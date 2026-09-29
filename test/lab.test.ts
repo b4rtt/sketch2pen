@@ -16,11 +16,12 @@ let result: ConvertResult;
 const board = (name: string): PenNode => result.doc.children.find((n) => n.name === name)!;
 const inBoard = (name: string) => allNodes({ children: [board(name)] });
 
+// the first conversion may build the CoreText helper and index the installed fonts
 beforeAll(async () => {
   const path = join(mkdtempSync(join(tmpdir(), 'sketch2pen-lab-')), 'lab.sketch');
   buildLab(path);
   result = await convertSketch(readSketch(path), { flexLayout: true, assetsDir: 'assets', pages: [] });
-});
+}, 120_000);
 
 describe('feature lab document', () => {
   test('is a valid pen.dev document', () => {
@@ -96,7 +97,7 @@ describe('feature lab in the pre-2025 document format', () => {
     buildLab(join(dir, 'lab.sketch'));
     makeLegacy(join(dir, 'lab.sketch'), join(dir, 'legacy.sketch'));
     legacy = await convertSketch(readSketch(join(dir, 'legacy.sketch')), { flexLayout: true, assetsDir: 'assets', pages: [] });
-  });
+  }, 120_000);
 
   test('is a valid pen.dev document', () => {
     checkInvariants(legacy.doc);

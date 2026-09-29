@@ -1,6 +1,6 @@
-import { describe, expect, test } from 'bun:test';
+import { beforeAll, describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { convertSketch } from '../src/convert/document.ts';
+import { convertSketch, type ConvertResult } from '../src/convert/document.ts';
 import { readSketch } from '../src/sketch/reader.ts';
 import { fill, layer, style, text, uid, writeSketch } from './fixture.ts';
 import { allNodes as all, byName, checkInvariants } from './invariants.ts';
@@ -53,8 +53,14 @@ describe('end-to-end conversion', () => {
     { name: 'Symbols', layers: [master] },
   ]);
 
-  test('produces a valid pen.dev document', async () => {
-    const { doc } = await convertSketch(readSketch(path), OPTIONS);
+  // the first conversion may build the CoreText helper and index the installed fonts
+  let result: ConvertResult;
+  beforeAll(async () => {
+    result = await convertSketch(readSketch(path), OPTIONS);
+  }, 120_000);
+
+  test('produces a valid pen.dev document', () => {
+    const { doc } = result;
     checkInvariants(doc);
     const screen = byName(doc, 'Screen')!;
     expect(screen.type).toBe('frame');
@@ -62,8 +68,8 @@ describe('end-to-end conversion', () => {
     expect(screen.fill).toBe('#FFFFFF');
   });
 
-  test('flipped groups are positioned for pen.dev’s mirror pivot and tinted', async () => {
-    const { doc } = await convertSketch(readSketch(path), OPTIONS);
+  test('flipped groups are positioned for pen.dev’s mirror pivot and tinted', () => {
+    const { doc } = result;
     const g = byName(doc, 'backbutton')!;
     expect(g.flipX).toBe(true);
     expect(g.x).toBe(16 + 24);
@@ -71,22 +77,22 @@ describe('end-to-end conversion', () => {
     expect(a.stroke).toBe('#FFFFFF');
   });
 
-  test('a shape masking a same-size bitmap becomes the shape with an image fill', async () => {
-    const { doc } = await convertSketch(readSketch(path), OPTIONS);
+  test('a shape masking a same-size bitmap becomes the shape with an image fill', () => {
+    const { doc } = result;
     const n = byName(doc, 'avatar mask + avatar')!;
     expect(n.type).toBe('ellipse');
     expect(JSON.stringify(n.fill)).toContain('./assets/pixel.png');
   });
 
-  test('blur-less inner shadows become inner per-side strokes', async () => {
-    const { doc } = await convertSketch(readSketch(path), OPTIONS);
+  test('blur-less inner shadows become inner per-side strokes', () => {
+    const { doc } = result;
     const card = byName(doc, 'card')!;
     expect(card.strokeWidth).toEqual({ top: 1 });
     expect(card.strokeAlignment).toBe('inner');
   });
 
-  test('symbol instances become refs with overrides and Sketch resizing', async () => {
-    const { doc, ctx } = await convertSketch(readSketch(path), OPTIONS);
+  test('symbol instances become refs with overrides and Sketch resizing', () => {
+    const { doc, ctx } = result;
     const ref = byName(doc, 'Button instance')!;
     const comp = byName(doc, 'Button')!;
     expect(ref.type).toBe('ref');
@@ -99,8 +105,8 @@ describe('end-to-end conversion', () => {
     expect(d[id(icon)]!.x).toBe(264); // pinned right → keeps the 12 px margin
   });
 
-  test('texts with several styles keep their runs', async () => {
-    const { doc } = await convertSketch(readSketch(path), OPTIONS);
+  test('texts with several styles keep their runs', () => {
+    const { doc } = result;
     const t = byName(doc, 'title')!;
     const texts = all({ children: [t] }).filter((n) => n.type === 'text');
     expect(texts.map((n) => n.fontWeight)).toEqual(['400', '700']);
@@ -114,5 +120,5 @@ describe.if(!!REAL && existsSync(REAL))('real design file', () => {
     const { doc, ctx } = await convertSketch(readSketch(REAL!), OPTIONS);
     checkInvariants(doc);
     expect(ctx.report.stats.layers).toBeGreaterThan(0);
-  });
+  }, 600_000);
 });
