@@ -1,0 +1,35 @@
+name: Conversion problem
+description: Something looks different in pen.dev than in Sketch, or the conversion fails.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please **do not attach confidential designs** – a small `.sketch` file that reproduces
+        the problem is the most helpful thing you can share.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What looks different, or the error message. Screenshots of Sketch and pen.dev side by side help a lot.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: Attach a small `.sketch` file (zip it first) or describe the layer setup.
+  - type: textarea
+    id: report
+    attributes:
+      label: Conversion report
+      description: The relevant part of `report.json` from the output folder, if any.
+      render: json
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: sketch2pen (`sketch2pen --version`), Sketch, pen.dev and your operating system.
+      placeholder: sketch2pen 1.0.0 · Sketch 2025.3 · pen.dev 1.4 · macOS 26
+    validations:
+      required: true
