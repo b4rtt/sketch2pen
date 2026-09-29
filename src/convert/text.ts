@@ -36,10 +36,10 @@ function transform(text: string, attrs: TextAttributes): string {
   return text;
 }
 
-function runStyle(ctx: Context, attrs: TextAttributes, layerFill: PenFill | PenFill[] | undefined): { style: RunStyle; lineHeightPx: number; substituted: boolean } {
+function runStyle(ctx: Context, attrs: TextAttributes, layerFill: PenFill | PenFill[] | undefined, tracking = 0): { style: RunStyle; lineHeightPx: number; substituted: boolean } {
   const font = attrs.MSAttributedStringFontAttribute?.attributes;
   const size = font?.size ?? 12;
-  const resolved = ctx.fonts.resolve(font?.name ?? 'Inter-Regular');
+  const resolved = ctx.fonts.resolve(font?.name ?? 'Inter-Regular', size);
   const para = attrs.paragraphStyle;
   const lh = para?.maximumLineHeight || para?.minimumLineHeight || 0;
   const style: RunStyle = {
@@ -49,7 +49,8 @@ function runStyle(ctx: Context, attrs: TextAttributes, layerFill: PenFill | PenF
     fill: layerFill ?? colorOrVariable(ctx, attrs.MSAttributedStringColorAttribute ?? { red: 0, green: 0, blue: 0, alpha: 1 }),
   };
   if (resolved.italic) style.fontStyle = 'italic';
-  if (attrs.kerning) style.letterSpacing = r2(attrs.kerning);
+  const spacing = (attrs.kerning ?? 0) + tracking;
+  if (Math.abs(spacing) >= 0.005) style.letterSpacing = r3(spacing);
   if (lh) style.lineHeight = r3(lh / size);
   if (attrs.underlineStyle) style.underline = true;
   if (attrs.strikethroughStyle) style.strikethrough = true;
@@ -74,9 +75,9 @@ export function rawRuns(layer: Layer): { text: string; attrs: TextAttributes }[]
 
 function splitRuns(ctx: Context, layer: Layer, layerFill: PenFill | PenFill[] | undefined): Run[] {
   const runs: Run[] = [];
-  for (const { text, attrs } of rawRuns(layer)) {
-    const { style, lineHeightPx, substituted } = runStyle(ctx, attrs, layerFill);
-    if (attrs.underlineStyle || attrs.strikethroughStyle) ctx.report.warn('text-decoration', 'Underline / strikethrough kept on the text, but pen.dev does not draw them yet');
+  const tracking = ctx.textTracking.get(layer.do_objectID) ?? [];
+  for (const [i, { text, attrs }] of rawRuns(layer).entries()) {
+    const { style, lineHeightPx, substituted } = runStyle(ctx, attrs, layerFill, tracking[i]);
     const key = JSON.stringify(style);
     const last = runs[runs.length - 1];
     if (last && last.key === key) last.text += text;

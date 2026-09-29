@@ -26,6 +26,7 @@ with `bun build --compile`; on macOS a small Swift helper adds CoreText text lay
 | `src/convert/symbols.ts` | instances and overrides, symbol swaps, resizing instances with Sketch's pinning rules |
 | `src/convert/style.ts` | fills, gradients, borders, shadows, blurs, tints |
 | `src/convert/extras.ts` | extra layers for what pen.dev lacks: dashed and multiple borders, line-end markers, shadow spread |
+| `src/convert/decorations.ts` | underline and strikethrough drawn as shapes |
 | `src/convert/flex.ts` | Sketch Stacks → flex layout, verified against Sketch's saved positions |
 | `src/convert/fonts.ts` | font discovery (Sketch file, installed fonts), OpenType parsing, substitution |
 | `src/convert/coretext.ts`, `native/coretext.swift` | the CoreText helper and its protocol |
@@ -43,10 +44,13 @@ with `bun build --compile`; on macOS a small Swift helper adds CoreText text lay
 2. **Document-level data.** Colour swatches become pen.dev variables; shared styles are indexed so overridden styles can
    be resolved by id.
 3. **Fonts.** `FontResolver` indexes fonts embedded in the Sketch file and (with `--embed-fonts all`) installed on the
-   computer by reading their `name`, `OS/2` and `fvar` tables, and decides per PostScript name whether the font is a
-   Google font, shipped or substituted.
+   computer by reading their `name`, `OS/2` and `fvar` tables (including the PostScript names of variable-font named
+   instances), and decides per PostScript name – and, for Apple's SF fonts, per size – whether the font is a Google
+   font, shipped or substituted.
 4. **CoreText pre-pass** (macOS). One call of the helper outlines all private-use glyph texts and lays out every wrapped
-   text with Sketch's line-breaking, returning each line's width in Sketch and in pen.dev.
+   text with Sketch's line-breaking, returning each line's width in Sketch and in pen.dev, where underlines and
+   strikethroughs go (with the font metrics), and the letter spacing that keeps Sketch's widths when pen.dev renders a
+   shipped font differently (another optical size or cut).
 5. **Symbol masters** are converted first, in dependency order, so instances can reference them and override
    resolution can look up the converted nodes.
 6. **Pages.** Each page's layers are converted and the page is placed as a section below the previous one. Library
@@ -70,8 +74,9 @@ directly. These are the behaviours the converter relies on, all verified by rend
   on a node that has a fill.
 - **Blend modes** exist on paints only and blend with everything behind the node, including the parent frame's
   background. A frame with opacity 0.999 isolates its children like a Sketch mask group does.
-- **Not drawn**: inner shadows (drawn as outer ones), shadow spread, dashed strokes, line markers, masks, inline text
-  formatting, paragraph spacing, underline and strikethrough. The converter emulates all but the last two.
+- **Not drawn**: inner shadows (pen.dev 1.2 draws them outside paths), shadow spread, dashed strokes, line markers,
+  masks, inline text formatting, paragraph spacing, underline and strikethrough (the properties exist but are not
+  rendered), size-specific tracking of Apple fonts (`trak`, optical-size spacing). The converter emulates all of them.
 - **Fonts**: pen.dev loads Google Fonts by family name and fonts listed in `fonts`:
   `{"name", "url": "./fonts/x.otf", "weight": 400 | [min, max], "style": "italic", "axes": [{"tag": "wght", "start", "end"}]}`.
   System fonts are not rendered. Variable fonts are rendered at their default optical size.

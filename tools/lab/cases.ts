@@ -44,6 +44,10 @@ const cases: Record<string, J[]> = {
     B.oval('i3', [168, 30, 60, 60], { style: { fills: [B.fill(B.hex('#E5E7EB'))], shadows: [B.shadow(BLUE, 3, 3, 4, 2, true)] } }),
     B.rect('i4', [16, 104, 212, 40], { style: { fills: [B.fill(B.hex('#FFFFFF'))], shadows: [B.shadow(B.hex('#D1D5DB'), 0, -1, 0, 0, true)] } }),
   ],
+  'inner shadow on paths': [
+    B.path('star', [16, 30, 90, 90], [[0.5, 0], [0.62, 0.36], [1, 0.38], [0.7, 0.62], [0.8, 1], [0.5, 0.78], [0.2, 1], [0.3, 0.62], [0, 0.38], [0.38, 0.36]], true, { style: { fills: [B.fill(YELLOW)], shadows: [B.shadow(B.hex('#000000', 0.5), 0, 3, 4, 0, true)] } }),
+    B.path('blob', [130, 30, 90, 90], [[0.1, 0.1, 30], [0.9, 0, 20], [1, 0.8, 30], [0.2, 1, 20]], true, { style: { fills: [B.fill(B.hex('#E5E7EB'))], shadows: [B.shadow(BLUE, -2, 2, 8, 0, true)] } }),
+  ],
   // ---------------------------------------------------------------------------------------------- fills
   'gradient linear diagonal': [
     B.rect('g', [20, 30, 200, 100], { style: { fills: [B.fill(RED, { gradient: B.gradient([[0, RED], [0.5, YELLOW], [1, BLUE]], '{0, 0}', '{1, 1}') })] } }),
@@ -135,6 +139,21 @@ const cases: Record<string, J[]> = {
     B.text('upper', [16, 76, 200, 20], [{ text: 'uppercase transform', font, size: 15, transform: 1 }]),
     B.text('kerning', [16, 106, 200, 20], [{ text: 'Letter spacing', font, size: 15, kerning: 3 }]),
   ],
+  'decorations wrapped': [
+    B.text('underlined paragraph', [20, 12, 200, 60], [{ text: 'An underlined paragraph that wraps over two centred lines', font, size: 14, underline: true, color: BLUE }], { sizing: [0, 1], align: 2, lineHeight: 20 }),
+    B.text('old price', [20, 100, 80, 20], [{ text: '$150.00', font, size: 16, strike: true, color: B.hex('#9CA3AF') }]),
+    B.text('new price', [110, 100, 80, 20], [{ text: '$120.00', font: bold, size: 16 }]),
+  ],
+  'sf pro sizes': [13, 17, 22, 34].map((size, i) =>
+    B.text(`sf ${size}`, [12, [8, 30, 56, 88][i]!, 220, 40], [{ text: `9:41 Wallet ${size}`, font: 'SFPro-Semibold', size }]),
+  ),
+  'ellipse mask': [
+    B.group('masked', [20, 30, 200, 100], [
+      B.oval('ellipse', [0, 0, 200, 100], { mask: 0 }),
+      ...[0, 1, 2, 3, 4].map((i) => B.rect(`band ${i}`, [i * 40, 0, 40, 100], { style: { fills: [B.fill([RED, BLUE, GREEN, YELLOW, INK][i]!)] } })),
+      B.text('inside', [70, 40, 60, 20], [{ text: 'Inside', font: bold, size: 14, color: B.hex('#FFFFFF') }]),
+    ]),
+  ],
   'rich text': [
     B.text('rich', [16, 16, 208, 128], [
       { text: 'Pay like a local with ', font, size: 15 },
@@ -162,6 +181,41 @@ const cases: Record<string, J[]> = {
     B.group('half', [40, 30, 160, 100], [B.rect('a', [0, 0, 100, 100], { style: { fills: [B.fill(RED)] } }), B.rect('b', [60, 0, 100, 100], { style: { fills: [B.fill(BLUE)] } })], { style: { opacity: 0.5 } }),
   ],
 };
+
+// A rectangle edited in Sketch: an extra point on the top edge, but still a rounded rectangle.
+function editedRoundedRect(name: string, f: [number, number, number, number], r: number, o: B.LayerOptions = {}): J {
+  const p = (x: number, y: number, radius: number) => ({ _class: 'curvePoint', cornerRadius: radius, cornerStyle: 0, curveFrom: `{${x}, ${y}}`, curveMode: 1, curveTo: `{${x}, ${y}}`, hasCurveFrom: false, hasCurveTo: false, point: `{${x}, ${y}}` });
+  const l = B.rect(name, f, { ...o, style: { radii: [r], ...o.style } });
+  return { ...l, edited: true, points: [p(0, 0, r), p(0.55, 0, 0), p(1, 0, r), p(1, 1, r), p(0, 1, r)] };
+}
+
+// Masks built from symbols: a striped tile reaching past a rounded mask, and a circle symbol used as a mask.
+function maskSymbols(): { masters: J[]; boards: Record<string, J[]> } {
+  const tile = B.symbolMaster('Tile', [300, -200, 120, 120], [
+    ...[0, 1, 2].map((i) => B.rect(`t${i}`, [i * 40, 0, 40, 120], { style: { fills: [B.fill([RED, BLUE, GREEN][i]!)] } })),
+  ]);
+  // the circle scales with the instance (relative sizing, no pins), like the shapes in Apple's UI kits
+  const circle = B.symbolMaster('Shape / Circle', [460, -200, 48, 48], [B.oval('Mask', [0, 0, 48, 48], { pins: [0, 0], sizing: [3, 3], style: { fills: [B.fill(B.hex('#E5E7EB'))] } })]);
+  return {
+    masters: [tile, circle],
+    boards: {
+      'edited rect mask': [
+        B.group('card', [20, 20, 200, 120], [
+          editedRoundedRect('mask', [0, 0, 200, 120], 32, { mask: 0, style: { fills: [B.fill(B.hex('#F3F4F6'))] } }),
+          B.instance('tile', tile, [-20, -20, 120, 120]),
+          B.instance('tile 2', tile, [120, 40, 120, 120]),
+        ]),
+      ],
+      'instance mask': [
+        B.group('flag', [70, 30, 100, 100], [
+          B.instance('Shape', circle, [0, 0, 100, 100], [], { mask: 0 }),
+          B.group('stripes', [-20, 0, 140, 100], [0, 1, 2, 3].map((i) => B.rect(`s${i}`, [0, i * 25, 140, 25], { style: { fills: [B.fill([RED, B.hex('#FFFFFF'), RED, BLUE][i]!)] } }))),
+          B.text('label', [-10, 38, 120, 24], [{ text: 'FLAG FLAG', font: bold, size: 20, color: INK }]),
+        ]),
+      ],
+    },
+  };
+}
 
 // Symbols: a button with a stretching background, centred label and an icon pinned to the right.
 function symbols(): { master: J; boards: Record<string, J[]> } {
@@ -195,14 +249,15 @@ function stacks(): Record<string, J[]> {
 
 export function buildLab(path: string): string[] {
   const sym = symbols();
-  const all: Record<string, J[]> = { ...cases, ...sym.boards, ...stacks() };
+  const masks = maskSymbols();
+  const all: Record<string, J[]> = { ...cases, ...sym.boards, ...masks.boards, ...stacks() };
   const names = Object.keys(all);
   const cols = 6;
   const boards = names.map((name, i) => B.frame(name, [(i % cols) * (W + 40), Math.floor(i / cols) * (H + 60), W, H], all[name]!));
   const master = sym.master;
   (master.frame as { x: number }).x = 0;
   (master.frame as { y: number }).y = -200;
-  B.writeDocument(path, [{ name: 'Lab', layers: boards }, { name: 'Symbols', layers: [master] }], { [IMG]: image });
+  B.writeDocument(path, [{ name: 'Lab', layers: boards }, { name: 'Symbols', layers: [master, ...masks.masters] }], { [IMG]: image });
   return names;
 }
 

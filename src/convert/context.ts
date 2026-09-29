@@ -128,6 +128,14 @@ export class Context {
   glyphs = new Map<string, import('./coretext.ts').GlyphOutline>();
   /** Sketch's line breaks of fixed-width texts with pen.dev line widths (CoreText pre-pass). */
   textLines = new Map<string, import('./coretext.ts').TextLine[]>();
+  /** extra letter spacing per text run that keeps Sketch's widths (fonts pen.dev renders differently) */
+  textTracking = new Map<string, number[]>();
+  /** metrics per text run of texts with underline / strikethrough */
+  textMetrics = new Map<string, import('./coretext.ts').FontMetrics[]>();
+  /** whether the CoreText helper ran (text measurement and outlines are exact) */
+  coreText = false;
+  /** Sketch text layer id → ids of the shapes drawing its underlines / strikethroughs */
+  textDecorations = new Map<string, string[]>();
   /** Sketch mask layer id → id of the clipping frame that replaced it. */
   maskFrames = new Map<string, string>();
   /** Components by their pen id. */

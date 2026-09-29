@@ -118,7 +118,13 @@ faithful option:
 
 Variable fonts are rendered by pen.dev at their default optical size, which makes some fonts (e.g. Inter 4 at large sizes)
 a few percent wider than in Sketch. The converter measures every text block with CoreText and widens fixed-width text
-boxes just enough to keep Sketch's line breaks.
+boxes just enough to keep Sketch's line breaks; for fonts it ships (such as Apple's SF Pro) it adds the difference to the
+letter spacing instead, so the text is exactly as wide as in Sketch.
+
+**SF Pro**: install Apple's fonts from [developer.apple.com/fonts](https://developer.apple.com/fonts/) and the converter
+uses the *SF Pro Text* or *SF Pro Display* cut that matches each text size, like Sketch does. Apple's licence allows them
+only for mock-ups of apps for Apple platforms and forbids passing them on, so keep converted folders with SF Pro to
+yourself.
 
 ## What gets converted
 
@@ -129,9 +135,10 @@ boxes just enough to keep Sketch's line breaks.
 | Colour, linear, radial and angular gradients, image fills, blend modes | fills (gradients re-mapped to pen.dev's coordinate system) |
 | Borders – several widths, dashes, line-end arrows | strokes, plus exact outlines where pen.dev has no equivalent |
 | Drop shadows (incl. spread), inner shadows, layer and background blur | effects, emulated where pen.dev falls short |
-| Masks (outline and alpha) | clipping frames; vector shapes and images are clipped exactly, alpha masks are baked into images |
+| Masks (outline, alpha, symbols as masks) | clipping frames with the mask's radii; other outlines cut vector shapes and images exactly, alpha masks are baked into images |
 | Tints on groups, frames and instances | recoloured content |
 | Text styles, mixed-style paragraphs, paragraph spacing, text transform | text layers (split per line/paragraph where pen.dev lacks inline formatting) |
+| Underline, strikethrough | drawn as shapes exactly where Sketch draws them (pen.dev does not draw them) |
 | SF Symbols and icon-font glyphs | vector paths |
 | Symbols, overrides, symbol swaps, resized and scaled instances | components and instances with overrides; Sketch's pinning rules applied |
 | Stacks | flex layout when it reproduces Sketch exactly, absolute positions otherwise |
@@ -143,8 +150,8 @@ boxes just enough to keep Sketch's line breaks.
 
 These come from the pen.dev format and are listed in each conversion report:
 
-- underline and strikethrough are kept on the text, but pen.dev does not draw them yet;
-- texts and symbol instances inside a path-shaped mask are clipped by the mask's bounds;
+- underline and strikethrough are drawn as separate shapes (pen.dev does not draw them) – on macOS only;
+- texts and symbol instances reaching past a path- or ellipse-shaped mask are clipped by the mask's bounds;
 - noise fills, motion/zoom blur, the glass blur and colour adjustments have no pen.dev equivalent;
 - prototype links, layout grids, guides and export presets are not converted;
 - text baselines can differ by up to 1 px for some size / line-height combinations.

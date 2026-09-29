@@ -1,12 +1,17 @@
 import { beforeAll, describe, expect, test } from 'bun:test';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { planFlex } from '../src/convert/flex.ts';
-import { weightFromStyle } from '../src/convert/fonts.ts';
+import { FontResolver, facesFromBytes, weightFromStyle } from '../src/convert/fonts.ts';
 import { pointsToPathData } from '../src/convert/path.ts';
 import { hexColor, linearGradientParams, tintPaint } from '../src/convert/style.ts';
 import { resizeAxis } from '../src/convert/symbols.ts';
+import type { SketchFile } from '../src/sketch/reader.ts';
 import type { Layer } from '../src/sketch/types.ts';
 import { IDENTITY, apply, layerMatrix, parsePoint, penTransform, rotateCCW } from '../src/util/geom.ts';
 import { combine, initPathOps, innerShadowBand } from '../src/util/pathops.ts';
+import { buildFont, type TestFont } from './fontdata.ts';
 
 describe('geometry', () => {
   test('parses Sketch point strings', () => {
@@ -110,6 +115,57 @@ describe('fonts', () => {
     expect(weightFromStyle('Extended ExtraBold')).toBe(800);
     expect(weightFromStyle('ExtraLight Italic')).toBe(200);
     expect(weightFromStyle('Black')).toBe(900);
+  });
+
+  const variable: TestFont = {
+    family: 'Test Var',
+    subfamily: 'Regular',
+    postscriptName: 'TestVar-Regular',
+    weight: 400,
+    axes: [['wght', 100, 400, 900], ['opsz', 17, 28, 28]],
+    instances: [
+      { subfamily: 'Regular', coords: [400, 28], ps: 'TestVar-Regular' },
+      { subfamily: 'Semibold', coords: [590, 28], ps: 'TestVar-Semibold' },
+    ],
+  };
+
+  test('named instances of variable fonts are read with their PostScript names', () => {
+    const [face] = facesFromBytes(buildFont(variable));
+    expect(face!.axes.map((a) => a.tag)).toEqual(['wght', 'opsz']);
+    expect(face!.instances).toEqual([
+      { postscriptName: 'TestVar-Regular', subfamily: 'Regular', coords: { wght: 400, opsz: 28 } },
+      { postscriptName: 'TestVar-Semibold', subfamily: 'Semibold', coords: { wght: 590, opsz: 28 } },
+    ]);
+  });
+
+  test('instances without a PostScript name get the name derived from the variations prefix', () => {
+    const [face] = facesFromBytes(buildFont({ ...variable, prefix: 'TestVarPS', instances: [{ subfamily: 'Extra Bold', coords: [800, 28] }] }));
+    expect(face!.instances!.map((i) => i.postscriptName)).toEqual(['TestVarPS-ExtraBold']);
+  });
+
+  const resolverWith = (fonts: TestFont[]) => {
+    const dir = mkdtempSync(join(tmpdir(), 'sketch2pen-fonts-'));
+    fonts.forEach((f, i) => writeFileSync(join(dir, `${i}.ttf`), buildFont(f)));
+    const sketch = { files: new Map(), document: {}, pages: [] } as unknown as SketchFile;
+    return new FontResolver(sketch, { embed: 'all', map: {}, dirs: [dir] });
+  };
+
+  test('a named instance resolves to its variable font with the instance weight', () => {
+    const r = resolverWith([variable]).resolve('TestVar-Semibold');
+    expect(r).toMatchObject({ family: 'Test Var', weight: 590, source: 'local' });
+    expect(r.face!.axes.find((a) => a.tag === 'wght')).toMatchObject({ min: 100, max: 900 });
+  });
+
+  test('SF Pro uses the installed Text or Display cut matching the size, like automatic optical sizing', () => {
+    const sfVariable: TestFont = { ...variable, family: 'SF Pro', postscriptName: 'SFPro-Regular', instances: [{ subfamily: 'Semibold', coords: [590, 28], ps: 'SFPro-Semibold' }] };
+    const text: TestFont = { family: 'SF Pro Text', subfamily: 'Semibold', postscriptName: 'SFProText-Semibold', weight: 600 };
+    const display: TestFont = { family: 'SF Pro Display', subfamily: 'Semibold', postscriptName: 'SFProDisplay-Semibold', weight: 600 };
+    const fonts = resolverWith([sfVariable, text, display]);
+    expect(fonts.resolve('SFPro-Semibold', 17)).toMatchObject({ family: 'SF Pro Text', weight: 600, postscriptName: 'SFPro-Semibold' });
+    expect(fonts.resolve('SFPro-Semibold', 34)).toMatchObject({ family: 'SF Pro Display', weight: 600 });
+    expect(fonts.documentFonts().map((f) => f.family).sort()).toEqual(['SF Pro Display', 'SF Pro Text']);
+    // without the static cuts the variable font itself is used
+    expect(resolverWith([sfVariable]).resolve('SFPro-Semibold', 17)).toMatchObject({ family: 'SF Pro', weight: 590 });
   });
 });
 

@@ -79,10 +79,14 @@ Node ids are derived from Sketch object ids, so converting the same file twice g
 
 pen.dev clips only with frames, so a Sketch mask and the layers it masks become a clipping frame:
 
-- **Rectangle and oval masks** become a frame with the same corner radius (circles stay exact).
+- **Rectangle and circle masks** become a frame with the same corner radii – exact for everything inside. This includes
+  rectangles edited in Sketch whose extra points still lie on the edges.
+- **Symbol instances used as masks** (e.g. a circle symbol clipping a flag) use the shape of their symbol, resized with
+  the instance by Sketch's pinning rules.
 - A shape masking **one image of the same size** becomes the shape with an image fill – the natural pen.dev structure.
-- **Path-shaped masks**: vector shapes and images inside are intersected with the mask outline exactly (Skia PathOps).
-  Texts and symbol instances are clipped by the mask's bounds (reported).
+- **Other outlines** (paths, ellipses): vector shapes and images inside are intersected with the outline exactly (Skia
+  PathOps); ellipses also get a pill-shaped clipping frame. Texts and symbol instances that reach past the outline can
+  only be clipped by the mask's bounds (reported only when that actually happens).
 - **Alpha masks** (the mask's opacity or gradient decides visibility) are baked: the masked images are multiplied with
   the mask's alpha and written as new PNGs in `assets/generated/`.
 
@@ -94,13 +98,20 @@ pen.dev clips only with frames, so a Sketch mask and the layers it masks become 
   variable fonts at their default optical size, which can make them slightly wider than in Sketch; such text boxes are
   widened just enough to keep Sketch's line breaks. Centred and right-aligned auto-width texts are re-anchored so they
   stay in place.
+- **Letter spacing of shipped variable fonts**: fonts like Apple's SF Pro change their spacing with the optical size
+  (Sketch applies it automatically, pen.dev does not). The converter measures both and adds the difference to the
+  text's letter spacing, so words are exactly as wide as in Sketch – for SF Pro at 17 pt that is −0.43 pt, Apple's
+  tracking for that size.
 - **Mixed styles in one text layer**: pen.dev has no inline formatting, so the text is split exactly where Sketch wraps
   it – one text layer per style run, arranged in rows (reported). When the lines cannot be measured, the dominant
   style is used for the paragraph (reported).
 - **Paragraph spacing**: one text layer per paragraph in a vertical stack with the right gap.
 - **SF Symbols and icon fonts** (private-use glyphs) are converted to vector paths, because pen.dev cannot render system
   fonts. This needs the macOS helper.
-- **Underline and strikethrough** stay on the text but pen.dev does not draw them yet (reported).
+- **Underline and strikethrough**: pen.dev keeps the properties on the text but does not draw them, so the converter
+  draws them as thin shapes where Sketch puts them – measured with CoreText on every line (the font's underline
+  position and thickness, half the x-height for strikethroughs), in the text colour. This needs the macOS helper;
+  elsewhere they stay on the text only (reported). In a symbol instance whose text is replaced, they are hidden.
 
 ### Fonts
 
@@ -108,7 +119,12 @@ pen.dev renders Google Fonts by name and fonts registered in the document. For e
 
 1. **Fonts embedded in the Sketch file** are written to `fonts/` and registered (`--embed-fonts document` or `all`).
 2. **Fonts installed on this computer** are shipped the same way (`--embed-fonts all`, the default). Font collections
-   (`.ttc`) are split into single faces, variable fonts are registered with their weight range.
+   (`.ttc`) are split into single faces, variable fonts are registered with their weight range. Named instances of
+   variable fonts (e.g. `SFPro-Semibold` inside `SF-Pro.ttf`) are found by their PostScript names.
+   - **Apple's SF Pro and SF Compact**: when Apple's static *Text* and *Display* cuts are installed
+     ([developer.apple.com/fonts](https://developer.apple.com/fonts/)), the cut closest to the text size is used, like
+     the automatic optical sizing Sketch applies. Mind Apple's licence: the fonts may only be used for mock-ups of
+     apps for Apple platforms and must not be passed on – keep converted folders that contain them to yourself.
 3. Otherwise the font is **substituted** with a close Google font – metric-compatible where one exists:
 
    | Sketch font | Substitute |
@@ -169,8 +185,9 @@ saturation, brightness, contrast) have no pen.dev equivalent and are skipped.
 | --- | --- |
 | `rich-lines`, `split-text`, `mixed-text` | text with several styles split into lines or runs, or drawn in its dominant style |
 | `paragraph-spacing` | paragraphs split into separate text layers |
-| `text-decoration` | underline / strikethrough not drawn by pen.dev |
-| `path-mask`, `rotated-mask`, `mask-stroke` | mask clipped by its bounds or drawn along the mask edge |
+| `text-decoration` | underline / strikethrough kept on the text but not drawn (no macOS helper, rotated text) |
+| `text-decoration-override` | underline / strikethrough hidden in an instance that replaces the text |
+| `path-mask`, `rotated-mask`, `mask-stroke` | texts / instances reaching past a mask outline clipped by its bounds, rotated masks, borders drawn along the mask edge |
 | `alpha-mask` | alpha mask whose content could not be baked, approximated by the mask's opacity |
 | `smooth-corners` | squircle corners drawn as regular radii (use `--smooth-corners`) |
 | `multi-border`, `dashed-border`, `dash-pattern` | border features pen.dev lacks on frames and texts |

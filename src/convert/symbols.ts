@@ -141,10 +141,15 @@ function applyProp(ctx: Context, info: MasterInfo, layer: Layer, pid: string, o:
       const content = t === 1 ? text.toUpperCase() : t === 2 ? text.toLowerCase() : text;
       merge(out, textIds[0]!, { content });
       for (const extra of textIds.slice(1)) merge(out, extra, { enabled: false });
+      // underlines were measured for the master's text – they would not fit the new one
+      const decorations = ctx.textDecorations.get(layer.do_objectID) ?? [];
+      for (const d of decorations) merge(out, d, { enabled: false });
+      if (decorations.length) ctx.report.warn('text-decoration-override', 'Underline / strikethrough of a text replaced in a symbol instance not drawn', where);
       break;
     }
     case 'isVisible':
       merge(out, pid, { enabled: !!o.value });
+      for (const d of ctx.textDecorations.get(layer.do_objectID) ?? []) merge(out, d, { enabled: !!o.value });
       break;
     case 'image': {
       const url = ctx.imageUrl((o.value as { _ref?: string })?._ref);
@@ -164,7 +169,7 @@ function applyProp(ctx: Context, info: MasterInfo, layer: Layer, pid: string, o:
       const font = attrs.MSAttributedStringFontAttribute?.attributes;
       const props: Props = {};
       if (font) {
-        const f = ctx.fonts.resolve(font.name);
+        const f = ctx.fonts.resolve(font.name, font.size);
         Object.assign(props, { fontFamily: f.family, fontWeight: String(f.weight), fontSize: r2(font.size), ...(f.italic ? { fontStyle: 'italic' } : {}) });
         const lh = attrs.paragraphStyle?.maximumLineHeight;
         if (lh) props.lineHeight = Math.round((lh / font.size) * 1000) / 1000;
@@ -252,7 +257,8 @@ function legacyPins(c: number | undefined): { h: number; v: number; hs: number; 
   };
 }
 
-function resizedFrame(layer: Layer, oldW: number, oldH: number, newW: number, newH: number): Rect {
+/** Where a layer of a symbol ends up when the instance has another size (Sketch's pins and sizing). */
+export function resizedFrame(layer: Layer, oldW: number, oldH: number, newW: number, newH: number): Rect {
   const f = layer.frame;
   const explicit = layer.horizontalPins !== undefined;
   const legacy = explicit ? null : legacyPins(layer.resizingConstraint);

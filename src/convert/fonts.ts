@@ -11,6 +11,14 @@ export interface FontAxis {
   max: number;
 }
 
+/** A named instance of a variable font (fvar), e.g. "SFPro-Semibold" inside SF-Pro.ttf. */
+export interface FontInstance {
+  postscriptName: string;
+  subfamily: string;
+  /** axis tag → value */
+  coords: Record<string, number>;
+}
+
 export interface FontFace {
   postscriptName: string;
   family: string; // typographic family (name id 16) or legacy family (id 1)
@@ -18,6 +26,8 @@ export interface FontFace {
   weight: number;
   italic: boolean;
   axes: FontAxis[];
+  /** named instances of a variable font */
+  instances?: FontInstance[];
   /** index inside a .ttc/.otc collection */
   faceIndex: number;
   collection: boolean;
@@ -35,6 +45,8 @@ export interface FontFile {
 export type FontSource = 'google' | 'embedded' | 'local' | 'substituted';
 
 export interface ResolvedFont {
+  /** PostScript name as used in the Sketch document */
+  postscriptName?: string;
   /** family name used in pen.dev */
   family: string;
   weight: number;
@@ -179,7 +191,7 @@ export function readFontFaces(read: (offset: number, length: number) => Buffer):
       const id = nb.readUInt16BE(rec + 6);
       const len = nb.readUInt16BE(rec + 8);
       const off = nb.readUInt16BE(rec + 10);
-      if (![1, 2, 4, 6, 16, 17].includes(id)) continue;
+      if (![1, 2, 4, 6, 16, 17, 25].includes(id) && id < 256) continue;
       const score = platform === 3 && lang === 0x409 ? 3 : platform === 3 ? 2 : platform === 1 && lang === 0 ? 1 : 0;
       const prev = names.get(id);
       if (prev && prev.score >= score) continue;
@@ -190,15 +202,31 @@ export function readFontFaces(read: (offset: number, length: number) => Buffer):
     const family = names.get(16)?.s ?? names.get(1)?.s ?? ps;
     const subfamily = names.get(17)?.s ?? names.get(2)?.s ?? 'Regular';
     const axes: FontAxis[] = [];
+    const instances: FontInstance[] = [];
     const fvar = tables.get('fvar');
     if (fvar && fvar.length >= 16) {
       const fb = read(fvar.offset, fvar.length);
       const axesOffset = fb.readUInt16BE(4);
       const axisCount = fb.readUInt16BE(8);
       const axisSize = fb.readUInt16BE(10);
+      const instanceCount = fb.readUInt16BE(12);
+      const instanceSize = fb.readUInt16BE(14);
       for (let a = 0; a < axisCount; a++) {
         const o = axesOffset + a * axisSize;
         axes.push({ tag: fb.toString('latin1', o, o + 4), min: fb.readInt32BE(o + 4) / 65536, def: fb.readInt32BE(o + 8) / 65536, max: fb.readInt32BE(o + 12) / 65536 });
+      }
+      // Named instances carry their own PostScript names, which is how Sketch refers to them ("SFPro-Semibold").
+      const prefix = (names.get(25)?.s ?? family).replace(/[^A-Za-z0-9]/g, '');
+      for (let i = 0; i < instanceCount; i++) {
+        const o = axesOffset + axisCount * axisSize + i * instanceSize;
+        if (o + 4 + axisCount * 4 > fb.length) break;
+        const sub = names.get(fb.readUInt16BE(o))?.s;
+        if (!sub) continue;
+        const coords: Record<string, number> = {};
+        axes.forEach((axis, k) => (coords[axis.tag] = fb.readInt32BE(o + 4 + k * 4) / 65536));
+        const psId = instanceSize >= axisCount * 4 + 6 ? fb.readUInt16BE(o + 4 + axisCount * 4) : 0xffff;
+        const instancePs = (psId !== 0xffff ? names.get(psId)?.s : undefined) ?? `${prefix}-${sub.replace(/[^A-Za-z0-9]/g, '')}`;
+        instances.push({ postscriptName: instancePs, subfamily: sub, coords });
       }
     }
     let weight = weightFromStyle(subfamily);
@@ -210,7 +238,7 @@ export function readFontFaces(read: (offset: number, length: number) => Buffer):
       if (wc >= 100 && wc <= 1000) weight = wc;
       italic = italic || (ob.readUInt16BE(62) & 1) === 1;
     }
-    faces.push({ postscriptName: ps, family, subfamily, weight, italic, axes, faceIndex, collection });
+    faces.push({ postscriptName: ps, family, subfamily, weight, italic, axes, ...(instances.length ? { instances } : {}), faceIndex, collection });
   });
   return faces;
 }
@@ -247,7 +275,24 @@ export function systemFontDirs(): string[] {
   return ['/usr/share/fonts', '/usr/local/share/fonts', join(home, '.fonts'), join(home, '.local/share/fonts')];
 }
 
-type Hit = { face: FontFace; file: FontFile };
+type Hit = { face: FontFace; file: FontFile; instance?: boolean };
+
+/** The face as a named instance of its variable font presents it: own PostScript name, style and weight. */
+function instanceFace(face: FontFace, inst: FontInstance): FontFace {
+  const italic = face.italic || /italic|oblique/i.test(inst.subfamily) || (inst.coords.ital ?? 0) >= 0.5 || (inst.coords.slnt ?? 0) !== 0;
+  const weight = inst.coords.wght !== undefined ? Math.round(inst.coords.wght) : weightFromStyle(inst.subfamily);
+  return { ...face, postscriptName: inst.postscriptName, subfamily: inst.subfamily, weight, italic, instances: undefined };
+}
+
+/** Indexes a face and its named instances by PostScript name; real (static) faces win over instances. */
+function registerFace(map: Map<string, Hit>, face: FontFace, file: FontFile): void {
+  const put = (ps: string, hit: Hit) => {
+    const prev = map.get(ps);
+    if (!prev || (prev.instance && !hit.instance)) map.set(ps, hit);
+  };
+  put(face.postscriptName, { face, file });
+  for (const inst of face.instances ?? []) put(inst.postscriptName, { face: instanceFace(face, inst), file, instance: true });
+}
 
 function scanInstalled(dirs: string[]): Map<string, Hit> {
   const map = new Map<string, Hit>();
@@ -271,9 +316,7 @@ function scanInstalled(dirs: string[]): Map<string, Hit> {
         continue;
       }
       if (!/\.(ttf|otf|ttc|otc)$/i.test(f)) continue;
-      for (const face of facesFromFile(p)) {
-        if (!map.has(face.postscriptName)) map.set(face.postscriptName, { face, file: { kind: 'local', path: p, faceIndex: face.faceIndex, collection: face.collection } });
-      }
+      for (const face of facesFromFile(p)) registerFace(map, face, { kind: 'local', path: p, faceIndex: face.faceIndex, collection: face.collection });
     }
   };
   for (const dir of dirs) if (existsSync(dir)) visit(dir, 0);
@@ -303,7 +346,8 @@ export class FontResolver {
   private families = new Map<string, string>(); // PS name → family from document.json fontReferences
   private cache = new Map<string, ResolvedFont>();
   private userMap: Map<string, string>;
-  readonly used = new Map<string, ResolvedFont>(); // PS name → resolution, for the report
+  /** every distinct resolution, for the report and the fonts to ship */
+  readonly used = new Map<string, ResolvedFont>();
 
   constructor(
     sketch: SketchFile,
@@ -312,9 +356,7 @@ export class FontResolver {
     this.installed = scanInstalled(options.dirs ?? systemFontDirs());
     for (const [name, data] of sketch.files) {
       if (!name.startsWith('fonts/')) continue;
-      for (const face of facesFromBytes(data)) {
-        this.embedded.set(face.postscriptName, { face, file: { kind: 'sketch', path: name, faceIndex: face.faceIndex, collection: face.collection } });
-      }
+      for (const face of facesFromBytes(data)) registerFace(this.embedded, face, { kind: 'sketch', path: name, faceIndex: face.faceIndex, collection: face.collection });
     }
     for (const ref of sketch.document.fontReferences ?? []) {
       for (const ps of ref.postscriptNames ?? []) this.families.set(ps, ref.fontFamilyName);
@@ -322,14 +364,43 @@ export class FontResolver {
     this.userMap = new Map(Object.entries(options.map ?? {}).map(([k, v]) => [k.trim().toLowerCase(), v.trim()]));
   }
 
-  resolve(postscriptName: string): ResolvedFont {
-    let res = this.cache.get(postscriptName);
+  /** How pen.dev renders the font with this PostScript name (at `size` points, which picks SF optical cuts). */
+  resolve(postscriptName: string, size?: number): ResolvedFont {
+    const cut = size !== undefined ? this.opticalCut(postscriptName, size) : undefined;
+    const key = cut ? `${postscriptName}@${cut}` : postscriptName;
+    let res = this.cache.get(key);
     if (!res) {
-      res = this.lookup(postscriptName);
-      this.cache.set(postscriptName, res);
+      res = { ...this.lookup(cut ?? postscriptName), postscriptName };
+      if (cut) res.originalFamily = this.lookup(postscriptName).originalFamily;
+      this.cache.set(key, res);
     }
-    this.used.set(postscriptName, res);
+    this.used.set(`${postscriptName}|${res.family}|${res.weight}|${res.italic}`, res);
     return res;
+  }
+
+  /**
+   * Apple's SF Pro / SF Compact variable fonts adapt their design to the text size (automatic optical sizing, which
+   * Sketch applies and pen.dev does not). When Apple's static cuts are installed, the Text or Display cut closest to
+   * the size is used instead – it is the same design pen.dev can render exactly.
+   */
+  private opticalCut(ps: string, size: number): string | undefined {
+    const m = /^(?:(SFPro|SFCompact)|\.(SFNS|SFCompact)(?:Text|Display)?)-([A-Za-z]+)$/.exec(ps);
+    if (!m) return undefined;
+    const family = m[1] ?? (m[2] === 'SFNS' ? 'SFPro' : 'SFCompact');
+    const variable = this.find(ps)?.face;
+    const opsz = variable?.axes.find((a) => a.tag === 'opsz');
+    const threshold = opsz && opsz.max > opsz.min ? (opsz.min + opsz.max) / 2 : family === 'SFPro' ? 22.5 : 19.5;
+    const cut = size < threshold ? 'Text' : 'Display';
+    const style = m[3]!;
+    for (const candidate of [`${family}${cut}-${style}`, ...(style === 'Italic' ? [`${family}${cut}-RegularItalic`] : [])]) {
+      const hit = this.find(candidate);
+      if (hit && !hit.instance) return candidate;
+    }
+    return undefined;
+  }
+
+  private find(ps: string): Hit | undefined {
+    return this.embedded.get(ps) ?? this.installed.get(ps);
   }
 
   /** Archive paths of all fonts embedded in the .sketch file. */
@@ -373,12 +444,14 @@ export class FontResolver {
     return this.substitute(family, weight, italic);
   }
 
-  /** Faces that have to ship with the .pen document. */
+  /** Faces that have to ship with the .pen document (one entry per pen.dev family and font file). */
   documentFonts(): { family: string; face: FontFace; file: FontFile }[] {
     const out = new Map<string, { family: string; face: FontFace; file: FontFile }>();
     for (const r of this.used.values()) {
       if (!r.file || !r.face || (r.source !== 'embedded' && r.source !== 'local')) continue;
-      out.set(`${r.file.path}#${r.file.faceIndex}`, { family: r.family, face: r.face, file: r.file });
+      const key = `${r.family}|${r.file.path}#${r.file.faceIndex}`;
+      // a variable font is registered once per family, whatever instances the document uses
+      if (!out.has(key)) out.set(key, { family: r.family, face: r.face, file: r.file });
     }
     return [...out.values()];
   }

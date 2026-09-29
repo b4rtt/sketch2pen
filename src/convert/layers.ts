@@ -8,9 +8,10 @@ import { planFlex, isFlexLayout } from './flex.ts';
 import { cornerRadii, ellipsePath, flipMatrix, multiply, parentMatrix, roundedRectPath, shapePathData, smoothRectPath } from './path.ts';
 import { decodeImage, encodePng } from '../util/image.ts';
 import { parsePoint } from '../util/geom.ts';
-import { glyphKey, glyphRequest } from './coretext.ts';
+import { glyphKey, glyphRequest, isDecorated } from './coretext.ts';
+import { textDecorations } from './decorations.ts';
 import { blendMode, colorOrVariable, convertBorders, convertEffects, convertFills, hexColor, paintValue, tintOf, tintPaint } from './style.ts';
-import { convertInstance } from './symbols.ts';
+import { convertInstance, resizedFrame } from './symbols.ts';
 import { convertText, textSizing } from './text.ts';
 
 export interface ParentInfo {
@@ -76,17 +77,99 @@ function hasVisibleStyle(l: Layer): boolean {
 }
 
 /**
+ * The layer whose outline clips: the mask itself, or – for a symbol instance used as a mask – the single shape its
+ * master consists of, resized with the instance by Sketch's rules (shape points are relative to the shape's frame).
+ */
+function maskGeometry(ctx: Context, mask: Layer): Layer {
+  if (mask._class !== 'symbolInstance') return mask;
+  const master = ctx.masters.get(mask.symbolID ?? '')?.master;
+  const visible = (master?.layers ?? []).filter((l) => l.isVisible !== false);
+  const shape = visible.length === 1 ? visible[0]! : undefined;
+  if (!master || !shape || !isShape(shape) || shape.rotation || shape.isFlippedHorizontal || shape.isFlippedVertical || mask.rotation) return mask;
+  const mf = master.frame;
+  const f = mask.frame;
+  const scaled = !!mask.scale && Math.abs(mask.scale - 1) > 0.001;
+  const sx = f.width / Math.max(mf.width, 1e-6);
+  const sy = f.height / Math.max(mf.height, 1e-6);
+  const r = scaled
+    ? { x: shape.frame.x * sx, y: shape.frame.y * sy, width: shape.frame.width * sx, height: shape.frame.height * sy }
+    : resizedFrame(shape, mf.width, mf.height, f.width, f.height);
+  // a mirrored instance mirrors the shape's place inside it
+  const x = mask.isFlippedHorizontal ? f.width - r.x - r.width : r.x;
+  const y = mask.isFlippedVertical ? f.height - r.y - r.height : r.y;
+  return {
+    ...shape,
+    do_objectID: mask.do_objectID,
+    name: mask.name,
+    frame: { ...f, x: f.x + x, y: f.y + y, width: r.width, height: r.height },
+    rotation: mask.rotation,
+    isFlippedHorizontal: mask.isFlippedHorizontal,
+    isFlippedVertical: mask.isFlippedVertical,
+    isVisible: mask.isVisible,
+    hasClippingMask: true,
+    clippingMaskMode: mask.clippingMaskMode,
+  };
+}
+
+/**
+ * Corner radii [tl, tr, br, bl] when the layer's outline is an axis-aligned (rounded) rectangle – also for edited
+ * rectangles and paths whose extra points only lie on the rectangle's edges.
+ */
+export function rectangleRadii(l: Layer): [number, number, number, number] | null {
+  if (l._class === 'rectangle' && !l.edited) return cornerRadii(l);
+  if ((l._class !== 'rectangle' && l._class !== 'shapePath') || l.isClosed === false) return null;
+  const pts = (l.points ?? []).map((q) => ({ p: parsePoint(q.point), r: q.cornerRadius || 0, curved: q.hasCurveFrom || q.hasCurveTo }));
+  if (pts.length < 4 || pts.some((q) => q.curved)) return null;
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-6;
+  const corners = [[0, 0], [1, 0], [1, 1], [0, 1]].map(([x, y]) => pts.findIndex((q) => near(q.p.x, x!) && near(q.p.y, y!)));
+  if (corners.some((i) => i < 0)) return null;
+  for (let i = 0; i < pts.length; i++) {
+    if (corners.includes(i)) continue;
+    const { p, r } = pts[i]!;
+    if (r > 0 || !(near(p.x, 0) || near(p.x, 1) || near(p.y, 0) || near(p.y, 1))) return null;
+  }
+  // the corners have to follow each other along the outline (either direction)
+  const order = [...corners].sort((a, b) => a - b).map((i) => corners.indexOf(i));
+  const steps = order.map((c, k) => (order[(k + 1) % 4]! - c + 4) % 4);
+  if (!steps.every((d) => d === 1) && !steps.every((d) => d === 3)) return null;
+  if (l.style?.corners?.radii?.length) return cornerRadii(l);
+  return corners.map((i) => pts[i]!.r) as [number, number, number, number];
+}
+
+/**
+ * Whether a masked layer would be drawn differently when clipped by the mask's bounds instead of its outline:
+ * shapes and images are clipped exactly anyway, other layers only matter where they reach past the outline.
+ */
+function crossesOutline(l: Layer, outline: PathShape, dx = 0, dy = 0): boolean {
+  if (l.isVisible === false || isShape(l) || l._class === 'shapeGroup' || l._class === 'bitmap') return false;
+  const f = l.frame;
+  if (l._class === 'group' && !l.groupBehavior && !l.rotation && !l.isFlippedHorizontal && !l.isFlippedVertical) {
+    return (l.layers ?? []).some((c) => crossesOutline(c, outline, dx + f.x, dy + f.y));
+  }
+  const x0 = dx + f.x + 0.5;
+  const y0 = dy + f.y + 0.5;
+  const x1 = dx + f.x + f.width - 0.5;
+  const y1 = dy + f.y + f.height - 0.5;
+  if (x1 <= x0 || y1 <= y0) return false;
+  return !!difference({ d: `M${x0} ${y0}L${x1} ${y0}L${x1} ${y1}L${x0} ${y1}Z`, fillRule: 'nonzero' }, outline)?.d;
+}
+
+/**
  * Sketch masks clip all following siblings. pen.dev has no masks, only clipping frames, so the mask becomes a
- * clipping frame (with its corner radius; circles stay exact) that contains the mask shape and the masked layers.
+ * clipping frame (with the mask's corner radii – exact for rectangles and circles) that contains the mask shape and
+ * the masked layers. Other outlines clip vector shapes and images exactly (Skia PathOps).
  */
 function convertMask(ctx: Context, mask: Layer, masked: Layer[], parent: ParentInfo): PenNode[] {
   const where = `${parent.path}/${mask.name}`;
-  const f = mask.frame;
-  const isRect = mask._class === 'rectangle' && !mask.edited;
-  const isOval = mask._class === 'oval' && !mask.edited;
+  const geom = maskGeometry(ctx, mask);
+  const f = geom.frame;
+  const rectRadii = rectangleRadii(geom);
+  const isRect = !!rectRadii;
+  const isOval = geom._class === 'oval' && !geom.edited;
+  const isCircle = isOval && Math.abs(f.width - f.height) < 0.5;
 
   // A shape masking a single bitmap of the same size → the shape itself with an image fill.
-  if ((isRect || isOval || mask._class === 'shapePath') && mask.clippingMaskMode !== 1 && masked.length === 1 && masked[0]!._class === 'bitmap' && !mask.rotation) {
+  if ((isRect || isOval || mask._class === 'shapePath') && mask === geom && mask.clippingMaskMode !== 1 && masked.length === 1 && masked[0]!._class === 'bitmap' && !mask.rotation) {
     const bmp = masked[0]!;
     const same = Math.abs(bmp.frame.x - f.x) < 0.6 && Math.abs(bmp.frame.y - f.y) < 0.6 && Math.abs(bmp.frame.width - f.width) < 0.6 && Math.abs(bmp.frame.height - f.height) < 0.6;
     const url = ctx.imageUrl(bmp.image?._ref);
@@ -105,14 +188,15 @@ function convertMask(ctx: Context, mask: Layer, masked: Layer[], parent: ParentI
 
   // Path masks: vector shapes are intersected with the mask outline exactly, everything else is clipped by its box.
   let clipPath: PathShape | undefined;
-  if (!isRect && !isOval) {
-    const outline = isShape(mask) ? { d: shapePathData(mask, parentMatrix(mask)), fillRule: 'nonzero' as const } : mask._class === 'shapeGroup' ? shapeGroupPath(mask, parentMatrix(mask)) : null;
+  if (!isRect && !isCircle) {
+    const outline = isShape(geom) ? { d: shapePathData(geom, parentMatrix(geom)), fillRule: 'nonzero' as const } : geom._class === 'shapeGroup' ? shapeGroupPath(geom, parentMatrix(geom)) : null;
     if (outline?.d) clipPath = parent.clipPath ? (intersect(outline, parent.clipPath) ?? outline) : outline;
-    const exact = masked.every((l) => isShape(l) || l._class === 'shapeGroup' || l._class === 'bitmap' || (l._class === 'group' && !l.groupBehavior));
-    if (!clipPath || !exact) ctx.report.warn('path-mask', 'Path-shaped mask: shapes and images are clipped exactly, texts and instances by the mask bounds (pen.dev only clips with frames)', where);
+    if (!clipPath || (outline && masked.some((l) => crossesOutline(l, outline)))) {
+      ctx.report.warn('path-mask', 'Path-shaped mask: shapes and images are clipped exactly, texts and instances reaching past the outline by the mask bounds (pen.dev only clips with frames)', where);
+    }
   }
   if (mask.clippingMaskMode === 1) {
-    const baked = bakeAlphaMask(ctx, mask, masked, parent, where);
+    const baked = bakeAlphaMask(ctx, geom, masked, parent, where);
     if (baked) return baked;
     ctx.report.warn('alpha-mask', 'Alpha mask approximated by the average opacity of the mask (pen.dev has no opacity masks)', where);
   }
@@ -131,22 +215,26 @@ function convertMask(ctx: Context, mask: Layer, masked: Layer[], parent: ParentI
     layout: 'none',
     clip: true,
   };
+  // circles are exact; for other ellipses the pill-shaped frame contains the ellipse, whose outline clips the shapes
   if (isOval) frame.cornerRadius = r2(Math.min(f.width, f.height) / 2);
-  if (isRect) {
-    const radii = cornerRadii(mask);
-    if (radii.some((r) => r > 0)) frame.cornerRadius = radii.every((r) => r === radii[0]) ? r2(radii[0]) : (radii.map(r2) as [number, number, number, number]);
+  if (rectRadii) {
+    const radii = rectRadii.map((r) => Math.max(0, Math.min(r, f.width / 2, f.height / 2)));
+    if (radii.some((r) => r > 0)) frame.cornerRadius = radii.every((r) => r === radii[0]) ? r2(radii[0]!) : (radii.map(r2) as [number, number, number, number]);
   }
   if (mask.isVisible === false) frame.enabled = false;
   if (mask.clippingMaskMode === 1) {
     // pen.dev has no opacity masks: approximate a gradient alpha mask by its average opacity
-    const fill = mask.style?.fills?.find((x) => x.isEnabled);
+    const fill = geom.style?.fills?.find((x) => x.isEnabled);
     let alpha = fill ? (fill.contextSettings?.opacity ?? 1) * (fill.fillType === 1 ? fill.gradient.stops.reduce((s, st) => s + st.color.alpha, 0) / Math.max(fill.gradient.stops.length, 1) : fill.color.alpha) : 1;
     alpha *= mask.style?.contextSettings?.opacity ?? 1;
     if (alpha < 0.99) frame.opacity = r3(alpha);
   }
   const inner: ParentInfo = { layout: 'none', dx: -f.x, dy: -f.y, path: where, tint: parent.tint, backdropEmpty: parent.backdropEmpty, clipPath: clipPath ?? parent.clipPath };
   const children: PenNode[] = [];
-  if (hasVisibleStyle(mask) && mask.isVisible !== false && mask.clippingMaskMode !== 1) children.push(...convertLayer(ctx, { ...mask, hasClippingMask: false }, inner));
+  // the mask layer itself is drawn too (for an instance, whatever its symbol paints)
+  if ((hasVisibleStyle(mask) || mask._class === 'symbolInstance') && mask.isVisible !== false && mask.clippingMaskMode !== 1) {
+    children.push(...convertLayer(ctx, { ...mask, hasClippingMask: false }, inner));
+  }
   // the painted mask shape is the backdrop of the masked layers (matters for their blend modes)
   children.push(...convertChildren(ctx, masked, children.length ? { ...inner, backdropEmpty: false } : inner));
   frame.children = children;
@@ -213,16 +301,16 @@ function bakeAlphaMask(ctx: Context, mask: Layer, masked: Layer[], parent: Paren
   const bmp = masked[0];
   if (masked.length !== 1 || !bmp || bmp._class !== 'bitmap' || bmp.isVisible === false) return null;
   if (mask.rotation || bmp.rotation || mask.isFlippedHorizontal || mask.isFlippedVertical || bmp.isFlippedHorizontal || bmp.isFlippedVertical) return null;
-  const isRect = mask._class === 'rectangle' && !mask.edited;
+  const rectRadii = rectangleRadii(mask);
   const isOval = mask._class === 'oval' && !mask.edited;
-  if (!isRect && !isOval) return null;
+  if (!rectRadii && !isOval) return null;
   const ref = bmp.image?._ref;
   const bytes = ref ? (ctx.sketch.files.get(ref) ?? ctx.sketch.files.get(`${ref}.png`)) : undefined;
   const img = bytes ? decodeImage(bytes) : null;
   if (!img) return null;
   const mf = mask.frame;
   const bf = bmp.frame;
-  const radii = isRect ? cornerRadii(mask) : [0, 0, 0, 0];
+  const radii = rectRadii ?? [0, 0, 0, 0];
   const inside = (x: number, y: number) => {
     if (x < 0 || y < 0 || x > mf.width || y > mf.height) return false;
     if (isOval) return ((x - mf.width / 2) / (mf.width / 2)) ** 2 + ((y - mf.height / 2) / (mf.height / 2)) ** 2 <= 1;
@@ -332,7 +420,7 @@ function applyEffects(ctx: Context, layer: Layer, node: PenNode, where: string):
 }
 
 // ---------------------------------------------------------------------------------------------
-// Inner shadows (pen.dev stores `inner` shadows as outer ones, so they are emulated)
+// Inner shadows (pen.dev 1.2 still draws `inner` shadows of paths as outer ones, so they are emulated)
 // ---------------------------------------------------------------------------------------------
 
 function layerOutline(layer: Layer): PathShape | null {
@@ -746,12 +834,15 @@ export function convertLayer(ctx: Context, layer: Layer, parent: ParentInfo): Pe
         if (node.x !== undefined) node.x = r2(node.x + dx);
         delete (node as PenNode & { _dx?: number })._dx;
       }
+      const decorations = isDecorated(layer) ? textDecorations(ctx, layer, node, parent, dx ?? 0, where) : [];
       const inner = applyEffects(ctx, layer, node, where);
       if (inner.length) ctx.report.warn('inner-shadow-text', 'Inner shadow on text is not supported – skipped', where);
       Object.assign(node, node.type === 'text' ? convertBorders(ctx, layer.style, layer.frame.width, layer.frame.height, where, false, true) : {});
       applyTint(node, parent.tint);
+      decorations.forEach((d) => applyTint(d, parent.tint));
       ctx.textParts.set(layer.do_objectID, res.textIds);
-      nodes = [node];
+      if (decorations.length) ctx.textDecorations.set(layer.do_objectID, decorations.map((d) => d.id));
+      nodes = [node, ...decorations];
       break;
     }
     case 'bitmap': {

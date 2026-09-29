@@ -113,6 +113,69 @@ describe('end-to-end conversion', () => {
   });
 });
 
+describe('masks', () => {
+  const pt = (x: number, y: number, r = 0) => ({ point: `{${x}, ${y}}`, curveFrom: `{${x}, ${y}}`, curveTo: `{${x}, ${y}}`, hasCurveFrom: false, hasCurveTo: false, curveMode: 1, cornerRadius: r });
+  // an edited rectangle with an extra point on its top edge is still a rounded rectangle
+  const roundedMask = layer('rectangle', 'rounded mask', [0, 0, 200, 100], {
+    hasClippingMask: true,
+    edited: true,
+    points: [pt(0, 0, 24), pt(0.55, 0), pt(1, 0, 24), pt(1, 1, 24), pt(0, 1, 24)],
+    style: style({ fills: [fill(1, 1, 1)] }),
+  });
+  const banner = layer('group', 'banner', [-10, 10, 120, 120], { groupBehavior: 0, layers: [layer('rectangle', 'art', [0, 0, 120, 120], { style: style({ fills: [fill(1, 0, 0)] }) })] });
+  const bannerRef = uid('SYM');
+  const bannerMaster = layer('symbolMaster', 'Banner art', [0, 0, 120, 120], { symbolID: bannerRef, groupBehavior: 0, layers: [layer('rectangle', 'art', [0, 0, 120, 120], { style: style({ fills: [fill(1, 0, 0)] }) })] });
+  const card = layer('group', 'Card', [0, 0, 200, 100], {
+    groupBehavior: 1,
+    layers: [roundedMask, banner, layer('symbolInstance', 'banner instance', [120, 40, 120, 120], { symbolID: bannerRef })],
+  });
+
+  // a symbol consisting of one circle, used as the mask of a flag
+  const circleId = uid('SYM');
+  const circle = layer('symbolMaster', 'Shape / Circle', [0, 300, 48, 48], { symbolID: circleId, groupBehavior: 0, layers: [layer('oval', 'Mask', [0, 0, 48, 48], { horizontalSizing: 3, verticalSizing: 3, style: style({ fills: [fill(0.9, 0.9, 0.9)] }) })] });
+  const flag = layer('group', 'Flag', [0, 0, 40, 40], {
+    groupBehavior: 1,
+    layers: [
+      layer('symbolInstance', 'Shape', [0, 0, 40, 40], { symbolID: circleId, hasClippingMask: true }),
+      layer('group', 'stripes', [-10, 0, 60, 40], { groupBehavior: 0, layers: [layer('text', 'label', [0, 0, 60, 40])] }),
+    ],
+  });
+
+  // a triangle mask: a text inside the outline needs no clipping, one reaching past it does
+  const tri = (name: string, inner: [number, number, number, number]) =>
+    layer('group', name, [0, 500, 100, 100], {
+      groupBehavior: 1,
+      layers: [
+        layer('shapePath', 'triangle', [0, 0, 100, 100], { hasClippingMask: true, isClosed: true, points: [pt(0.5, 0), pt(1, 1), pt(0, 1)] }),
+        text('caption', inner, [['Hi', 'Inter-Regular', 12]]),
+      ],
+    });
+  const path = writeSketch([{ name: 'Masks', layers: [card, flag, tri('inside', [40, 70, 20, 16]), tri('crossing', [0, 0, 100, 16])] }, { name: 'Symbols', layers: [circle, bannerMaster] }]);
+
+  let result: ConvertResult;
+  beforeAll(async () => {
+    result = await convertSketch(readSketch(path), OPTIONS);
+  }, 120_000);
+
+  test('an edited rectangle that is still a rounded rectangle clips like one', () => {
+    const frame = byName(result.doc, 'rounded mask (mask)')!;
+    expect(frame).toMatchObject({ type: 'frame', clip: true, cornerRadius: 24 });
+    expect(all({ children: [frame] }).map((n) => n.name)).toContain('banner instance');
+  });
+
+  test('a symbol instance used as a mask clips with the shape of its symbol', () => {
+    // the circle scales with the instance (relative sizing): 48 → 40
+    const frame = byName(result.doc, 'Shape (mask)')!;
+    expect(frame).toMatchObject({ clip: true, cornerRadius: 20, width: 40, height: 40 });
+  });
+
+  test('only content that reaches past a path mask is reported', () => {
+    const examples = result.ctx.report.warnings.find((w) => w.code === 'path-mask')?.examples ?? [];
+    expect(examples.some((e) => e.includes('crossing'))).toBe(true);
+    expect(examples.some((e) => e.includes('inside') || e.includes('Card') || e.includes('Flag'))).toBe(false);
+  });
+});
+
 // Optional: run the invariants against a real design file, e.g. SKETCH2PEN_REAL_FILE=~/Designs/App.sketch bun test
 const REAL = process.env.SKETCH2PEN_REAL_FILE;
 describe.if(!!REAL && existsSync(REAL))('real design file', () => {

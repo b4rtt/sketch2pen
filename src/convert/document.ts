@@ -94,6 +94,9 @@ export async function convertSketch(sketch: SketchFile, options: ConvertOptions)
   const ct = runCoreText(sketch, ctx.fonts);
   ctx.glyphs = ct.glyphs;
   ctx.textLines = ct.lines;
+  ctx.textMetrics = ct.metrics;
+  ctx.textTracking = ct.tracking;
+  ctx.coreText = ct.available;
   if (!ct.available) ctx.report.warn('no-coretext', 'CoreText helper not available (needs macOS) – SF Symbols and text wrapping are approximated');
 
   // 1) Symbol masters (local + library) become reusable components, converted before any instance.

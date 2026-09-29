@@ -15,8 +15,8 @@ export interface FontRow {
 
 export function fontRows(ctx: Context): FontRow[] {
   return [...ctx.fonts.used.entries()]
-    .map(([ps, f]) => ({
-      postscriptName: ps,
+    .map(([key, f]) => ({
+      postscriptName: f.postscriptName ?? key,
       family: f.originalFamily,
       penFamily: f.family,
       weight: f.weight,

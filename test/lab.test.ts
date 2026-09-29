@@ -81,6 +81,32 @@ describe('feature lab document', () => {
     expect(g.rotation).toBe(-20);
   });
 
+  test('underline and strikethrough are drawn as shapes (macOS) or reported', () => {
+    const decorated = [...inBoard('decorations'), ...inBoard('decorations wrapped')].filter((n) => / \((underline|strikethrough)\)$/.test(n.name ?? ''));
+    if (!result.ctx.coreText) {
+      expect(decorated.length).toBe(0);
+      expect(result.ctx.report.warnings.some((w) => w.code === 'text-decoration')).toBe(true);
+      return;
+    }
+    expect(decorated.map((n) => n.name).sort()).toEqual(['old price (strikethrough)', 'strike (strikethrough)', 'underline (underline)', 'underlined paragraph (underline)']);
+    // one stretch per wrapped line, in the text colour
+    const paragraph = decorated.find((n) => n.name === 'underlined paragraph (underline)')!;
+    expect(paragraph.geometry!.match(/M/g)!.length).toBe(2); // Sketch wraps it into two lines
+    expect(paragraph.fill).toBe('#3B82F6');
+    expect(result.ctx.report.warnings.some((w) => w.code === 'text-decoration')).toBe(false);
+  });
+
+  test('masks keep their exact outline where pen.dev can clip with frames', () => {
+    expect(inBoard('edited rect mask').find((n) => n.name === 'mask (mask)')).toMatchObject({ type: 'frame', clip: true, cornerRadius: 32 });
+    // the circle symbol scales with the instance used as a mask
+    expect(inBoard('instance mask').find((n) => n.name === 'Shape (mask)')).toMatchObject({ clip: true, cornerRadius: 50, width: 100, height: 100 });
+    // an ellipse: pill-shaped frame, shapes cut to the ellipse
+    const ellipse = inBoard('ellipse mask');
+    expect(ellipse.find((n) => n.name === 'ellipse (mask)')).toMatchObject({ clip: true, cornerRadius: 50 });
+    expect(ellipse.filter((n) => n.name?.startsWith('band')).every((n) => n.type === 'path')).toBe(true);
+    expect(result.ctx.report.warnings.some((w) => w.code === 'path-mask')).toBe(false);
+  });
+
   test('fonts pen.dev cannot load are shipped with the document or substituted', () => {
     const fonts = result.ctx.fonts;
     const helvetica = [...fonts.used.values()].find((f) => f.originalFamily.startsWith('Helvetica'));
