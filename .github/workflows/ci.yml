@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+        if: runner.os == 'Linux'
+      - run: bun test
+
+  binary:
+    name: Standalone binary (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Build
+        run: bun build src/cli.ts --compile --minify --outfile dist/sketch2pen
+      - name: Build the CoreText helper
+        if: runner.os == 'macOS'
+        run: |
+          codesign --force --sign - dist/sketch2pen
+          swiftc -O native/coretext.swift -o dist/sketch2pen-coretext
+      - name: Convert the feature lab with the binary
+        run: |
+          bun tools/lab/cases.ts lab.sketch
+          ./dist/sketch2pen --version
+          ./dist/sketch2pen lab.sketch --out lab-out --no-open
+          test -s lab-out/lab.pen
+          test -s lab-out/report.html
+          bun -e "const r = await Bun.file('lab-out/report.json').json(); if (!r.stats?.frames) throw new Error('empty conversion'); console.log(r.stats)"

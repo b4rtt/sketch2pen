@@ -1,0 +1,32 @@
+{
+  "fill" : {
+    "linear-gradient" : [
+      "display-p3:0.99000,0.52000,0.24000,1.00000",
+      "display-p3:0.53000,0.22000,0.93000,1.00000"
+    ],
+    "orientation" : {
+      "start" : { "x" : 0.15, "y" : 0 },
+      "stop" : { "x" : 0.85, "y" : 1 }
+    }
+  },
+  "groups" : [
+    {
+      "layers" : [
+        { "glass" : true, "image-name" : "nib.svg", "name" : "nib" },
+        { "glass" : true, "image-name" : "barrel.svg", "name" : "barrel" }
+      ],
+      "shadow" : { "kind" : "neutral", "opacity" : 0.5 },
+      "translucency" : { "enabled" : true, "value" : 0.35 }
+    },
+    {
+      "layers" : [
+        { "glass" : false, "image-name" : "curve.svg", "name" : "curve" }
+      ],
+      "shadow" : { "kind" : "neutral", "opacity" : 0.3 },
+      "translucency" : { "enabled" : false, "value" : 0 }
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : "shared"
+  }
+}

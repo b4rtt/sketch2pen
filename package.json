@@ -1,0 +1,53 @@
+{
+  "name": "sketch2pen",
+  "version": "1.0.0",
+  "description": "Convert Sketch (.sketch) designs directly into pen.dev (.pen) documents – no Figma in between.",
+  "keywords": [
+    "sketch",
+    "pen.dev",
+    "pencil",
+    "design",
+    "converter",
+    "sketch-to-pen",
+    "design-migration"
+  ],
+  "homepage": "https://github.com/b4rtt/sketch2pen#readme",
+  "bugs": {
+    "url": "https://github.com/b4rtt/sketch2pen/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/b4rtt/sketch2pen.git"
+  },
+  "license": "MIT",
+  "author": "b4rtt",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "sketch2pen": "src/cli.ts"
+  },
+  "engines": {
+    "bun": ">=1.2"
+  },
+  "scripts": {
+    "start": "bun src/cli.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "build": "bash tools/build.sh",
+    "build:host": "bash tools/build.sh --host",
+    "compare": "bun tools/compare.ts",
+    "lab": "bun tools/lab/run.ts",
+    "fonts:update": "bun tools/update-google-fonts.ts"
+  },
+  "dependencies": {
+    "fflate": "^0.8.2",
+    "jpeg-js": "^0.4.4",
+    "pathkit-wasm": "^1.0.0",
+    "pngjs": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/pngjs": "^6.0.5",
+    "typescript": "^5.9.0"
+  }
+}
