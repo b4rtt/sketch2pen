@@ -3,13 +3,14 @@
 //
 //   bun tools/compare-pen.ts <file.pen> <workdir> [--limit N] [--no-symbols] [--no-stacks]
 //
-// pen.dev renders a temporary copy of the document next to the original (relative image urls keep working); the
-// copy is removed afterwards.
+// pen.dev renders a copy of the document in the work folder (relative image and font urls made absolute), so the
+// original is never opened.
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { readPen } from '../src/pen/reader.ts';
+import { localPath, readPen } from '../src/pen/reader.ts';
+import type { PenDocument } from '../src/pen/types.ts';
 import { convertPen } from '../src/pen2sketch/document.ts';
 import { penConsoleSummary } from '../src/pen2sketch/summary.ts';
 import { zipDocument } from '../src/sketch/builder.ts';
@@ -46,15 +47,20 @@ console.log(`${selected.length} frames`);
 const refDir = join(work, 'ref');
 rmSync(refDir, { recursive: true, force: true });
 mkdirSync(refDir, { recursive: true });
-for (let i = 0; i < selected.length; i += 40) {
-  const chunk = selected.slice(i, i + 40);
-  spawnSync(SKETCHTOOL, ['export', 'layers', sketchFile, `--items=${chunk.map((b) => b.sketchId).join(',')}`, '--formats=png', '--scales=2', `--output=${refDir}`, '--use-id-for-name=YES'], { stdio: 'ignore' });
+// `export artboards` – `export layers` misses nested symbols whose masters are not on the document's current page
+for (const mode of ['artboards', 'layers']) {
+  const todo = selected.filter((b) => !existsSync(join(refDir, `${b.sketchId}@2x.png`)));
+  for (let i = 0; i < todo.length; i += 40) {
+    const chunk = todo.slice(i, i + 40);
+    spawnSync(SKETCHTOOL, ['export', mode, sketchFile, `--items=${chunk.map((b) => b.sketchId).join(',')}`, '--formats=png', '--scales=2', `--output=${refDir}`, '--use-id-for-name=YES'], { stdio: 'ignore' });
+  }
 }
 
 // pen.dev renders
 if (!values['skip-pen']) {
-  const copy = join(dirname(input), `.compare-${Date.now()}.pen`);
-  copyFileSync(input, copy);
+  // a fresh file name each run – pen.dev keeps open documents in memory
+  const copy = join(work, `render-${Date.now()}.pen`);
+  writeFileSync(copy, JSON.stringify(absoluteUrls(readPen(input).doc, pen.dir)));
   try {
     spawnSync('open', ['-a', 'Pen', copy]);
     const mcp = new PenMcp();
@@ -84,3 +90,20 @@ if (!values['skip-pen']) {
 
 console.log(summary(diffBoards(work, selected)));
 console.log(`report: ${join(work, 'compare.html')}`);
+
+/** The document with relative image and font urls resolved against its folder. */
+function absoluteUrls(doc: PenDocument, dir: string): PenDocument {
+  const fix = (u: unknown) => (typeof u === 'string' ? (localPath(dir, u) ?? u) : u);
+  const paints = (v: unknown) => {
+    for (const p of Array.isArray(v) ? v : [v]) if (p && typeof p === 'object' && (p as { type?: string }).type === 'image') (p as { url: unknown }).url = fix((p as { url: unknown }).url);
+  };
+  for (const f of doc.fonts ?? []) f.url = fix(f.url) as string;
+  const visit = (n: Record<string, unknown>) => {
+    paints(n.fill);
+    paints(n.stroke);
+    for (const d of Object.values((n.descendants as Record<string, Record<string, unknown>>) ?? {})) if (d && typeof d === 'object') visit(d);
+    for (const c of (n.children as Record<string, unknown>[]) ?? []) visit(c);
+  };
+  for (const c of doc.children) visit(c as unknown as Record<string, unknown>);
+  return doc;
+}

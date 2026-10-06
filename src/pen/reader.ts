@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, isAbsolute, resolve } from 'node:path';
 import type { PenDocument, PenNode } from './types.ts';
 
 /** A node as read from a .pen file: any property may still be bound to a variable ("$name"). */
@@ -19,9 +19,18 @@ const ALIGN: Record<string, 'inner' | 'center' | 'outer'> = { inside: 'inner', i
 
 /**
  * Brings older documents to the current schema. Files saved by pen.dev before schema 2.10 or so describe a stroke as
- * one object: `stroke: {align, thickness, fill}`.
+ * one object (`stroke: {align, thickness, fill}`) and icons as `icon_font` nodes.
  */
 function normalize(node: PenInputNode): void {
+  if ((node.type as string) === 'icon_font') {
+    node.type = 'icon';
+    if (node.icon === undefined && node.iconFontName !== undefined) node.icon = node.iconFontName as string;
+    if (node.library === undefined && node.iconFontFamily !== undefined) node.library = node.iconFontFamily as string;
+    if (node.weight === undefined && node.iconFontWeight !== undefined) node.weight = node.iconFontWeight as number;
+    delete node.iconFontName;
+    delete node.iconFontFamily;
+    delete node.iconFontWeight;
+  }
   const s = node.stroke as unknown;
   if (s && typeof s === 'object' && !Array.isArray(s) && !('type' in s) && ('fill' in s || 'thickness' in s || 'align' in s)) {
     const legacy = s as { fill?: unknown; thickness?: unknown; align?: string; cap?: string; join?: string };
@@ -37,6 +46,24 @@ function normalize(node: PenInputNode): void {
   // overrides and replacements inside instances use the same shapes
   const desc = node.descendants as Record<string, PenInputNode> | undefined;
   if (desc && typeof desc === 'object') for (const d of Object.values(desc)) if (d && typeof d === 'object') normalize(d);
+}
+
+/**
+ * Local file a url of the document refers to (images, fonts): relative to the document, absolute, or file://; the
+ * url may be percent-encoded. Null for remote and data urls.
+ */
+export function localPath(dir: string, url: string): string | null {
+  if (/^(https?|data):/i.test(url)) return null;
+  const raw = url.startsWith('file://') ? url.slice(7) : url;
+  const candidates = [raw];
+  try {
+    const decoded = decodeURIComponent(raw);
+    if (decoded !== raw) candidates.push(decoded, decoded.normalize('NFC'), decoded.normalize('NFD'));
+  } catch {
+    // not percent-encoded
+  }
+  const paths = candidates.map((c) => (isAbsolute(c) ? c : resolve(dir, c)));
+  return paths.find((p) => existsSync(p)) ?? paths[paths.length > 1 ? 1 : 0]!;
 }
 
 export function parsePen(text: string, path = 'document.pen'): PenFile {

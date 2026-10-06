@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join, resolve } from 'node:path';
-import type { PenFile } from '../pen/reader.ts';
+import { join } from 'node:path';
+import { localPath, type PenFile } from '../pen/reader.ts';
 import type { FontLibrary } from './fonts.ts';
 import { iconKey, type IconRequest, type IconSvg } from './icons.ts';
 import type { Report } from './report.ts';
@@ -104,8 +104,8 @@ export class Context {
       return m[1] ? new Uint8Array(Buffer.from(m[2]!, 'base64')) : new TextEncoder().encode(decodeURIComponent(m[2]!));
     }
     if (/^https?:\/\//i.test(url)) return this.remote.get(url) ?? null;
-    const path = url.startsWith('file://') ? decodeURIComponent(url.slice(7)) : isAbsolute(url) ? url : resolve(this.pen.dir, url);
-    return existsSync(path) ? new Uint8Array(readFileSync(path)) : null;
+    const path = localPath(this.pen.dir, url);
+    return path && existsSync(path) ? new Uint8Array(readFileSync(path)) : null;
   }
 
   iconRequest(n: RNode): IconRequest | null {

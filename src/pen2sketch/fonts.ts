@@ -4,9 +4,9 @@
 // Sketch renders the same typeface.
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { isAbsolute, join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { facesFromBytes, googleFamily, installedFonts, penFamilyName, weightFromStyle, type FontFace } from '../convert/fonts.ts';
-import type { PenFile } from '../pen/reader.ts';
+import { localPath, type PenFile } from '../pen/reader.ts';
 import { FontMetrics } from '../util/fontmetrics.ts';
 import { GoogleFonts } from './googlefonts.ts';
 import type { Report } from './report.ts';
@@ -123,7 +123,7 @@ export class FontLibrary {
   ) {
     for (const f of pen.doc.fonts ?? []) {
       const url = String(f.url ?? '');
-      const path = /^[a-z]+:\/\//i.test(url) ? null : isAbsolute(url) ? url : resolve(pen.dir, url);
+      const path = localPath(pen.dir, url);
       if (!path || !existsSync(path)) {
         report.warn('missing-font-file', 'Font shipped with the document is missing', `${f.name} (${url})`);
         continue;
