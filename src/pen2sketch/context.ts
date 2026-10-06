@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import type { PenFile } from '../pen/reader.ts';
 import type { FontLibrary } from './fonts.ts';
-import { iconUrl, type IconSvg } from './icons.ts';
+import { iconKey, type IconRequest, type IconSvg } from './icons.ts';
 import type { Report } from './report.ts';
 import type { RNode } from './tree.ts';
 import type { Variables } from './variables.ts';
@@ -65,7 +65,7 @@ export class Context {
   /** colour variable → Sketch swatch */
   readonly swatches = new Map<string, { id: string; name: string; hex: string }>();
   private remote = new Map<string, Uint8Array | null>();
-  /** icon SVGs by url (loaded before the conversion) */
+  /** icon outlines by request key (loaded before the conversion) */
   icons = new Map<string, IconSvg | null>();
 
   constructor(
@@ -108,15 +108,15 @@ export class Context {
     return existsSync(path) ? new Uint8Array(readFileSync(path)) : null;
   }
 
-  iconUrlOf(n: RNode): string | null {
-    const lib = this.vars.string(n.p.library, n.theme);
+  iconRequest(n: RNode): IconRequest | null {
+    const library = this.vars.string(n.p.library, n.theme);
     const name = this.vars.string(n.p.icon, n.theme);
-    return lib && name ? iconUrl(lib, name, this.vars.number(n.p.weight, n.theme)) : null;
+    return library && name ? { library, name, weight: this.vars.number(n.p.weight, n.theme), size: Math.min(n.w, n.h) } : null;
   }
 
   icon(n: RNode): IconSvg | null {
-    const url = this.iconUrlOf(n);
-    return url ? (this.icons.get(url) ?? null) : null;
+    const r = this.iconRequest(n);
+    return r ? (this.icons.get(iconKey(r)) ?? null) : null;
   }
 
   /** Stores an image for the Sketch document; null when it cannot be read or converted. */

@@ -101,6 +101,14 @@ export class Variables {
     return v;
   }
 
+  /** Resolves variables anywhere inside a value (paint objects, effect lists, gradient stops …). */
+  deep(value: unknown, theme: PenTheme = this.defaultTheme): unknown {
+    const v = this.value(value, theme);
+    if (Array.isArray(v)) return v.map((x) => this.deep(x, theme));
+    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, this.deep(x, theme)]));
+    return v;
+  }
+
   number(value: unknown, theme?: PenTheme): number | undefined {
     const v = this.value(value, theme);
     if (typeof v === 'number' && Number.isFinite(v)) return v;

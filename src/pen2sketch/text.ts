@@ -4,7 +4,7 @@ import * as B from '../sketch/builder.ts';
 import type { Context } from './context.ts';
 import { parseWeight, type FontChoice } from './fonts.ts';
 import { BLACK, paints, sketchColor, sketchFills } from './paint.ts';
-import { layoutText, penTextBox, type TextStyle } from './textlayout.ts';
+import { layoutText, lineHeightPx, penTextBox, type TextStyle } from './textlayout.ts';
 import type { RNode } from './tree.ts';
 import type { ResolvedColor } from './variables.ts';
 
@@ -66,19 +66,43 @@ export function measureText(ctx: Context, n: RNode, width?: number): { width: nu
   return width === undefined ? box : { width, height: box.height };
 }
 
+/**
+ * How far the Sketch text layer moves so its baselines meet pen.dev's (measured against renders of both).
+ * pen.dev centres the glyphs (ascender + descender) in the line – in the unrounded line when the font's own line
+ * height is used – and rounds the baseline to a whole pixel below the top of the text box. Sketch centres them in the
+ * line too, but with the font's line gap (leading) above them, also rounds, and then snaps the baseline up to the
+ * device pixel grid when it draws (half a point on Retina screens) – aiming a quarter point higher halves that error.
+ */
+export function baselineOffset(ctx: Context, n: RNode): number {
+  const props = textProps(ctx, n);
+  const style = textStyle(ctx, props);
+  const v = style.metrics?.vertical ?? { ascender: 0.95, descender: 0.25, lineGap: 0 };
+  const a = v.ascender * props.size;
+  const d = v.descender * props.size;
+  const g = v.lineGap * props.size;
+  const L = Math.round(lineHeightPx(style));
+  const pen = Math.round(props.lineHeight !== undefined ? (L - (a + d)) / 2 + a : a + g / 2);
+  const sketch = Math.round((L - (a + d)) / 2 + a + g);
+  return pen - sketch - SKETCH_SNAP_BIAS;
+}
+
+const SKETCH_SNAP_BIAS = 0.25;
+
 const ALIGN = { left: 0, right: 1, center: 2, justify: 3 } as const;
 const VALIGN = { top: 0, middle: 1, bottom: 2 } as const;
 
 function attributes(ctx: Context, props: TextProps, color: ResolvedColor): J {
   const font = fontOf(ctx, props);
-  const lh = props.lineHeight !== undefined ? props.lineHeight * props.size : undefined;
+  // pen.dev draws every line as tall as the rounded line height – the font's own one too
+  const lh = Math.round(lineHeightPx({ metrics: font.metrics, size: props.size, letterSpacing: 0, lineHeight: props.lineHeight }));
   return {
     MSAttributedStringFontAttribute: { _class: 'fontDescriptor', attributes: { name: font.postscriptName, size: props.size } },
     MSAttributedStringColorAttribute: sketchColor(ctx, color),
     paragraphStyle: {
       _class: 'paragraphStyle',
       alignment: ALIGN[props.align],
-      ...(lh !== undefined ? { maximumLineHeight: lh, minimumLineHeight: lh } : {}),
+      maximumLineHeight: lh,
+      minimumLineHeight: lh,
       allowsDefaultTighteningForTruncation: 0,
     },
     ...(props.letterSpacing ? { kerning: props.letterSpacing } : {}),

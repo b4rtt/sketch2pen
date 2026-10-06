@@ -1,7 +1,10 @@
-// Icon-library nodes (lucide, feather, Material Symbols, Phosphor): pen.dev draws them from the libraries' SVGs.
-// The converter loads the same SVGs (cached) and draws them as vector shapes.
+// Icon-library nodes. pen.dev draws them with icon fonts – lucide 0.563.0, Phosphor 1.4.2, Material Symbols (a
+// Google variable font addressed by ligatures) and feather. The converter loads the same fonts (cached) and draws the
+// glyph outlines as vector shapes, placed like pen.dev places them (measured against its renders): the em square
+// centred on the shorter side of the box – Material Symbols at 90 % of it. Feather comes from its SVGs.
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { FontMetrics } from '../util/fontmetrics.ts';
 
 export interface IconShape {
   d: string;
@@ -13,28 +16,39 @@ export interface IconShape {
 }
 
 export interface IconSvg {
+  /** coordinate space of the shapes that is fitted (centred, uniformly scaled) into the node box */
   viewBox: { x: number; y: number; w: number; h: number };
   shapes: IconShape[];
 }
 
-/** CDN url of an icon's SVG, or null for an unknown library. */
-export function iconUrl(library: string, name: string, weight?: number): string | null {
+export interface IconRequest {
+  library: string;
+  name: string;
+  weight?: number;
+  /** drawn size (the shorter side of the box) */
+  size: number;
+}
+
+const LUCIDE = 'https://unpkg.com/lucide-static@0.563.0/font';
+const PHOSPHOR = 'https://unpkg.com/phosphor-icons@1.4.2/src';
+
+export function iconKey(r: IconRequest): string {
+  return `${r.library.trim().toLowerCase()}|${r.name.trim()}|${r.weight ?? ''}|${MATERIAL.test(r.library.trim().toLowerCase()) ? materialOpsz(r.size) : ''}`;
+}
+
+const MATERIAL = /^material symbols (outlined|rounded|sharp)$/;
+
+/**
+ * Optical size pen.dev draws Material Symbols at: the variable font's default (48), whatever the size. pen.dev pins an
+ * older release of the font, so a few glyphs differ slightly from the current one.
+ */
+function materialOpsz(_size: number): number {
+  return 48;
+}
+
+export function knownLibrary(library: string): boolean {
   const lib = library.trim().toLowerCase();
-  const icon = encodeURIComponent(name.trim());
-  if (!icon) return null;
-  if (lib === 'lucide') return `https://cdn.jsdelivr.net/npm/lucide-static@latest/icons/${icon}.svg`;
-  if (lib === 'feather') return `https://cdn.jsdelivr.net/npm/feather-icons@4/dist/icons/${icon}.svg`;
-  const material = /^material symbols (outlined|rounded|sharp)$/.exec(lib);
-  if (material) {
-    const w = Math.min(700, Math.max(100, Math.round((weight ?? 400) / 100) * 100));
-    return `https://cdn.jsdelivr.net/npm/@material-symbols/svg-${w}@latest/${material[1]}/${icon}.svg`;
-  }
-  if (lib === 'phosphor') {
-    const w = weight ?? 400;
-    const style = w <= 150 ? 'thin' : w <= 300 ? 'light' : w <= 500 ? 'regular' : 'bold';
-    return `https://cdn.jsdelivr.net/npm/@phosphor-icons/core@2/assets/${style}/${icon}${style === 'regular' ? '' : `-${style}`}.svg`;
-  }
-  return null;
+  return lib === 'lucide' || lib === 'feather' || lib === 'phosphor' || MATERIAL.test(lib);
 }
 
 function attr(tag: string, name: string): string | undefined {
@@ -100,28 +114,107 @@ export function parseIconSvg(svg: string): IconSvg | null {
   return shapes.length ? { viewBox, shapes } : null;
 }
 
-/** Downloads (or reads from the cache) icon SVGs. */
-export async function loadIcons(urls: string[], cacheDir: string, download: boolean): Promise<Map<string, IconSvg | null>> {
+/** A glyph of an icon font: its outline in the em square, `scale` = share of the box the em square takes. */
+function glyphIcon(font: FontMetrics, glyph: number | null, scale = 1): IconSvg | null {
+  if (glyph === null || !glyph) return null;
+  const d = font.outline(glyph);
+  if (!d) return null;
+  const em = font.unitsPerEm;
+  const size = em / scale;
+  // the em square spans y = −em … 0 (baseline at 0, y down); it is centred in the box
+  return { viewBox: { x: (em - size) / 2, y: -em - (size - em) / 2, w: size, h: size }, shapes: [{ d, stroke: false, strokeWidth: 0, cap: 0, join: 0, evenOdd: false }] };
+}
+
+class Cache {
+  constructor(
+    private dir: string,
+    private download: boolean,
+  ) {}
+
+  async get(url: string): Promise<Uint8Array | null> {
+    const file = join(this.dir, url.replace(/^https:\/\/[^/]+\//, '').replace(/[^A-Za-z0-9._@-]+/g, '_'));
+    if (existsSync(file)) return new Uint8Array(readFileSync(file));
+    if (!this.download) return null;
+    try {
+      const res = await fetch(url, { headers: { 'User-Agent': '' }, signal: AbortSignal.timeout(30_000) });
+      if (!res.ok) return null;
+      const data = new Uint8Array(await res.arrayBuffer());
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(`${file}.part`, data);
+      renameSync(`${file}.part`, file);
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
+  async text(url: string): Promise<string | null> {
+    const d = await this.get(url);
+    return d ? new TextDecoder().decode(d) : null;
+  }
+}
+
+/** Static instance of a Material Symbols family at pen.dev's axis values (cached). */
+async function materialFont(cache: Cache, style: string, weight: number, opsz: number): Promise<FontMetrics | null> {
+  const family = `Material Symbols ${style[0]!.toUpperCase()}${style.slice(1)}`;
+  const w = Math.min(700, Math.max(100, Math.round(weight)));
+  const css = await cache.text(`https://fonts.googleapis.com/css2?family=${family.replace(/ /g, '+')}:opsz,wght,FILL,GRAD@${opsz},${w},0,0`);
+  const url = css && /url\((https:\/\/fonts\.gstatic\.com\/[^)]+\.ttf)\)/.exec(css)?.[1];
+  const data = url ? await cache.get(url) : null;
+  return data ? new FontMetrics(data) : null;
+}
+
+/** Loads (or reads from the cache) the icons a document uses. */
+export async function loadIcons(requests: IconRequest[], cacheDir: string, download: boolean): Promise<Map<string, IconSvg | null>> {
+  const cache = new Cache(join(cacheDir, 'icons'), download);
   const out = new Map<string, IconSvg | null>();
+  const unique = new Map(requests.map((r) => [iconKey(r), r]));
+  const lazy = <T>(load: () => Promise<T>) => {
+    let p: Promise<T> | null = null;
+    return () => (p ??= load());
+  };
+  const lucide = lazy(async () => {
+    const [font, info] = await Promise.all([cache.get(`${LUCIDE}/lucide.ttf`), cache.text(`${LUCIDE}/info.json`)]);
+    return font && info ? { font: new FontMetrics(font), map: JSON.parse(info) as Record<string, { encodedCode: string }> } : null;
+  });
+  const phosphor = lazy(async () => {
+    const [font, map] = await Promise.all([cache.get(`${PHOSPHOR}/fonts/Phosphor.ttf`), cache.text(`${PHOSPHOR}/unicodesMap.json`)]);
+    return font && map ? { font: new FontMetrics(font), map: JSON.parse(map) as Record<string, number> } : null;
+  });
+  const material = new Map<string, Promise<FontMetrics | null>>();
   await Promise.all(
-    [...new Set(urls)].map(async (url) => {
-      const file = join(cacheDir, 'icons', url.replace(/^https:\/\/cdn\.jsdelivr\.net\/npm\//, '').replace(/[^A-Za-z0-9._@-]+/g, '_'));
-      let text: string | null = null;
-      if (existsSync(file)) text = readFileSync(file, 'utf8');
-      else if (download) {
-        try {
-          const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
-          if (res.ok) {
-            text = await res.text();
-            mkdirSync(dirname(file), { recursive: true });
-            writeFileSync(`${file}.part`, text);
-            renameSync(`${file}.part`, file);
-          }
-        } catch {
-          text = null;
+    [...unique.entries()].map(async ([key, r]) => {
+      const lib = r.library.trim().toLowerCase();
+      const name = r.name.trim();
+      let icon: IconSvg | null = null;
+      try {
+        if (lib === 'lucide') {
+          const l = await lucide();
+          const code = l?.map[name]?.encodedCode;
+          if (l && code) icon = glyphIcon(l.font, l.font.glyph(parseInt(code.replace(/^\\/, ''), 16)));
+        } else if (lib === 'phosphor') {
+          const p = await phosphor();
+          const w = r.weight ?? 400;
+          const style = w <= 150 ? '-thin' : w <= 300 ? '-light' : w <= 500 ? '' : '-bold';
+          const code = p?.map[`ph-${name}${style}`] ?? p?.map[`ph-${name}`];
+          if (p && code) icon = glyphIcon(p.font, p.font.glyph(code));
+        } else if (MATERIAL.test(lib)) {
+          const style = MATERIAL.exec(lib)![1]!;
+          const opsz = materialOpsz(r.size);
+          const k = `${style}|${r.weight ?? 400}|${opsz}`;
+          if (!material.has(k)) material.set(k, materialFont(cache, style, r.weight ?? 400, opsz));
+          const font = await material.get(k)!;
+          if (font) icon = glyphIcon(font, font.ligature(name), 0.9);
+        } else if (lib === 'feather') {
+          const svg = await cache.text(`https://cdn.jsdelivr.net/npm/feather-icons@4/dist/icons/${encodeURIComponent(name)}.svg`);
+          if (svg) icon = parseIconSvg(svg);
+          // pen.dev's feather font sits a little higher than the SVGs (measured: 0.2 of 24 units)
+          if (icon) icon.viewBox.y += 0.2;
         }
+      } catch {
+        icon = null;
       }
-      out.set(url, text ? parseIconSvg(text) : null);
+      out.set(key, icon);
     }),
   );
   return out;

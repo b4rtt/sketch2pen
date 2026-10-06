@@ -307,6 +307,199 @@ export class FontMetrics {
     return 0;
   }
 
+  /** Number of glyphs (maxp). */
+  get glyphCount(): number {
+    const maxp = this.table('maxp');
+    return maxp !== null ? this.view.getUint16(maxp + 4) : 0;
+  }
+
+  /**
+   * Outline of a TrueType glyph as SVG path data in font units, y pointing down (baseline at 0). Composite glyphs are
+   * resolved (offsets only). Null for fonts without a glyf table (CFF).
+   */
+  outline(glyph: number, depth = 0): string | null {
+    const head = this.table('head');
+    const loca = this.table('loca');
+    const glyf = this.table('glyf');
+    if (head === null || loca === null || glyf === null || depth > 8) return null;
+    const v = this.view;
+    const long = v.getInt16(head + 50) === 1;
+    const at = (i: number) => (long ? v.getUint32(loca + i * 4) : v.getUint16(loca + i * 2) * 2);
+    const start = at(glyph);
+    const end = at(glyph + 1);
+    if (end <= start) return '';
+    const g = glyf + start;
+    const contours = v.getInt16(g);
+    const f = (n: number) => Math.round(n * 100) / 100;
+    if (contours < 0) {
+      // composite: components with x/y offsets
+      let d = '';
+      let o = g + 10;
+      for (;;) {
+        const flags = v.getUint16(o);
+        const index = v.getUint16(o + 2);
+        o += 4;
+        let dx = 0;
+        let dy = 0;
+        if (flags & 1) {
+          dx = v.getInt16(o);
+          dy = v.getInt16(o + 2);
+          o += 4;
+        } else {
+          dx = v.getInt8(o);
+          dy = v.getInt8(o + 1);
+          o += 2;
+        }
+        let a = 1, b = 0, c = 0, e = 1;
+        if (flags & 0x8) {
+          a = e = v.getInt16(o) / 16384;
+          o += 2;
+        } else if (flags & 0x40) {
+          a = v.getInt16(o) / 16384;
+          e = v.getInt16(o + 2) / 16384;
+          o += 4;
+        } else if (flags & 0x80) {
+          a = v.getInt16(o) / 16384;
+          b = v.getInt16(o + 2) / 16384;
+          c = v.getInt16(o + 4) / 16384;
+          e = v.getInt16(o + 6) / 16384;
+          o += 8;
+        }
+        const part = this.outline(index, depth + 1) ?? '';
+        // transform the component's path (y down: flip the offset)
+        d += part.replace(/(-?[\d.]+) (-?[\d.]+)/g, (_, xs: string, ys: string) => {
+          const x = Number(xs);
+          const y = -Number(ys);
+          return `${f(a * x + c * y + dx)} ${f(-(b * x + e * y + dy))}`;
+        });
+        if (!(flags & 0x20)) break;
+      }
+      return d;
+    }
+    const endPts: number[] = [];
+    for (let i = 0; i < contours; i++) endPts.push(v.getUint16(g + 10 + i * 2));
+    const n = contours ? endPts[contours - 1]! + 1 : 0;
+    const instrLen = v.getUint16(g + 10 + contours * 2);
+    let o = g + 12 + contours * 2 + instrLen;
+    const flags: number[] = [];
+    while (flags.length < n) {
+      const fl = v.getUint8(o++);
+      flags.push(fl);
+      if (fl & 8) {
+        let rep = v.getUint8(o++);
+        while (rep-- > 0) flags.push(fl);
+      }
+    }
+    const xs: number[] = [];
+    const ys: number[] = [];
+    let x = 0;
+    for (const fl of flags) {
+      if (fl & 2) {
+        const dx = v.getUint8(o++);
+        x += fl & 16 ? dx : -dx;
+      } else if (!(fl & 16)) {
+        x += v.getInt16(o);
+        o += 2;
+      }
+      xs.push(x);
+    }
+    let y = 0;
+    for (const fl of flags) {
+      if (fl & 4) {
+        const dy = v.getUint8(o++);
+        y += fl & 32 ? dy : -dy;
+      } else if (!(fl & 32)) {
+        y += v.getInt16(o);
+        o += 2;
+      }
+      ys.push(y);
+    }
+    let d = '';
+    let first = 0;
+    for (const last of endPts) {
+      const pts: { x: number; y: number; on: boolean }[] = [];
+      for (let i = first; i <= last; i++) pts.push({ x: xs[i]!, y: -ys[i]!, on: (flags[i]! & 1) === 1 });
+      first = last + 1;
+      if (!pts.length) continue;
+      // start on an on-curve point (or the midpoint of two off-curve ones)
+      let startIdx = pts.findIndex((p) => p.on);
+      let startPt: { x: number; y: number };
+      if (startIdx < 0) {
+        startPt = { x: (pts[0]!.x + pts[1 % pts.length]!.x) / 2, y: (pts[0]!.y + pts[1 % pts.length]!.y) / 2 };
+        startIdx = 0;
+      } else startPt = pts[startIdx]!;
+      d += `M${f(startPt.x)} ${f(startPt.y)}`;
+      let ctrl: { x: number; y: number } | null = null;
+      for (let k = 1; k <= pts.length; k++) {
+        const p = pts[(startIdx + k) % pts.length]!;
+        const isStart = k === pts.length;
+        const target = isStart ? startPt : p;
+        if (!isStart && !p.on) {
+          if (ctrl) {
+            const mid = { x: (ctrl.x + p.x) / 2, y: (ctrl.y + p.y) / 2 };
+            d += `Q${f(ctrl.x)} ${f(ctrl.y)} ${f(mid.x)} ${f(mid.y)}`;
+          }
+          ctrl = p;
+          continue;
+        }
+        if (ctrl) d += `Q${f(ctrl.x)} ${f(ctrl.y)} ${f(target.x)} ${f(target.y)}`;
+        else d += `L${f(target.x)} ${f(target.y)}`;
+        ctrl = null;
+      }
+      d += 'Z';
+    }
+    return d;
+  }
+
+  /** The glyph a ligature-forming font (icon fonts like Material Symbols) shows for a whole string, if any. */
+  ligature(text: string): number | null {
+    const gsub = this.table('GSUB');
+    if (gsub === null) return null;
+    const v = this.view;
+    const glyphs = [...text].map((ch) => this.glyph(ch.codePointAt(0)!));
+    if (!glyphs.length || glyphs.some((g) => !g)) return null;
+    const featureList = gsub + v.getUint16(gsub + 6);
+    const lookupList = gsub + v.getUint16(gsub + 8);
+    const lookups = new Set<number>();
+    const fCount = v.getUint16(featureList);
+    for (let i = 0; i < fCount; i++) {
+      const r = featureList + 2 + i * 6;
+      const tag = this.tag(r);
+      if (tag !== 'liga' && tag !== 'rlig' && tag !== 'dlig' && tag !== 'calt') continue;
+      const feature = featureList + v.getUint16(r + 4);
+      const count = v.getUint16(feature + 2);
+      for (let k = 0; k < count; k++) lookups.add(v.getUint16(feature + 4 + k * 2));
+    }
+    for (const index of [...lookups].sort((a, b) => a - b)) {
+      const lookup = lookupList + v.getUint16(lookupList + 2 + index * 2);
+      const type = v.getUint16(lookup);
+      const subCount = v.getUint16(lookup + 4);
+      for (let s = 0; s < subCount; s++) {
+        let sub = lookup + v.getUint16(lookup + 6 + s * 2);
+        let subType = type;
+        if (type === 7) {
+          subType = v.getUint16(sub + 2);
+          sub = sub + v.getUint32(sub + 4);
+        }
+        if (subType !== 4) continue;
+        const cov = this.coverageIndex(sub + v.getUint16(sub + 2), glyphs[0]!);
+        if (cov < 0) continue;
+        const set = sub + v.getUint16(sub + 6 + cov * 2);
+        const ligCount = v.getUint16(set);
+        for (let l = 0; l < ligCount; l++) {
+          const lig = set + v.getUint16(set + 2 + l * 2);
+          const ligGlyph = v.getUint16(lig);
+          const comps = v.getUint16(lig + 2);
+          if (comps !== glyphs.length) continue;
+          let match = true;
+          for (let c = 1; c < comps; c++) if (v.getUint16(lig + 4 + (c - 1) * 2) !== glyphs[c]) match = false;
+          if (match) return ligGlyph;
+        }
+      }
+    }
+    return null;
+  }
+
   glyph(codePoint: number): number {
     return this.cmap.get(codePoint) ?? 0;
   }

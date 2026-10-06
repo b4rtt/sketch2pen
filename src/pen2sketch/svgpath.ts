@@ -344,19 +344,13 @@ export function ellipseArcPath(w: number, h: number, startDeg: number, sweepDeg:
   return d + 'Z';
 }
 
-/** Regular polygon with `n` corners filling a w×h box, first corner at the top centre. */
+/** Regular polygon with `n` corners inscribed in the ellipse of a w×h box, first corner at the top centre. */
 export function polygonPoints(n: number, w: number, h: number): P[] {
   const count = Math.max(3, Math.round(n));
-  const raw: P[] = [];
+  const out: P[] = [];
   for (let i = 0; i < count; i++) {
-    const a = -Math.PI / 2 + (i * 2 * Math.PI) / count;
-    raw.push({ x: Math.cos(a), y: Math.sin(a) });
+    const a = (i * 2 * Math.PI) / count;
+    out.push({ x: (0.5 + 0.5 * Math.sin(a)) * w, y: (0.5 - 0.5 * Math.cos(a)) * h });
   }
-  const xs = raw.map((p) => p.x);
-  const ys = raw.map((p) => p.y);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  return raw.map((p) => ({ x: ((p.x - minX) / (maxX - minX || 1)) * w, y: ((p.y - minY) / (maxY - minY || 1)) * h }));
+  return out;
 }

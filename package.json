@@ -1,7 +1,7 @@
 {
   "name": "sketch2pen",
   "version": "1.1.0",
-  "description": "Convert Sketch (.sketch) designs directly into pen.dev (.pen) documents – no Figma in between.",
+  "description": "Convert Sketch (.sketch) designs directly into pen.dev (.pen) documents \u2013 no Figma in between.",
   "keywords": [
     "sketch",
     "pen.dev",
@@ -36,7 +36,9 @@
     "build": "bash tools/build.sh",
     "build:host": "bash tools/build.sh --host",
     "compare": "bun tools/compare.ts",
+    "compare:pen": "bun tools/compare-pen.ts",
     "lab": "bun tools/lab/run.ts",
+    "lab:pen": "bun tools/lab/pen-run.ts",
     "fonts:update": "bun tools/update-google-fonts.ts"
   },
   "dependencies": {

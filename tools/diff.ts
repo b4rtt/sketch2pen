@@ -48,6 +48,23 @@ function resize(img: Image, width: number, height: number): Image {
   return { width, height, data };
 }
 
+/** Places the image centred on a white canvas of the given size (cropping when it is larger). */
+function pad(img: Image, width: number, height: number): Image {
+  const data = new Uint8Array(width * height * 3).fill(255);
+  const dx = Math.round((width - img.width) / 2);
+  const dy = Math.round((height - img.height) / 2);
+  for (let y = 0; y < img.height; y++) {
+    const ty = y + dy;
+    if (ty < 0 || ty >= height) continue;
+    for (let x = 0; x < img.width; x++) {
+      const tx = x + dx;
+      if (tx < 0 || tx >= width) continue;
+      data.set(img.data.subarray((y * img.width + x) * 3, (y * img.width + x) * 3 + 3), (ty * width + tx) * 3);
+    }
+  }
+  return { width, height, data };
+}
+
 const THRESHOLD = 40;
 
 export function diffBoards(work: string, boards: Board[]): BoardScore[] {
@@ -66,7 +83,9 @@ export function diffBoards(work: string, boards: Board[]): BoardScore[] {
     let note = '';
     if (pen.width !== ref.width || pen.height !== ref.height) {
       note = `size ${pen.width}×${pen.height} ≠ ${ref.width}×${ref.height}`;
-      pen = resize(pen, ref.width, ref.height);
+      // a few pixels: the renderers round the bounds of content reaching past the frame differently – centre it
+      const small = Math.abs(pen.width - ref.width) <= 4 && Math.abs(pen.height - ref.height) <= 4;
+      pen = small ? pad(pen, ref.width, ref.height) : resize(pen, ref.width, ref.height);
     }
     const heat = new PNG({ width: ref.width, height: ref.height });
     let bad = 0;

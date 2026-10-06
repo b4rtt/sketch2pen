@@ -91,7 +91,7 @@ export interface PenNode {
   clip?: boolean;
   layout?: 'none' | 'vertical' | 'horizontal';
   gap?: number;
-  padding?: number | [number, number, number, number];
+  padding?: number | [number, number] | [number, number, number, number];
   justifyContent?: 'start' | 'center' | 'end' | 'space_between' | 'space_around';
   alignItems?: 'start' | 'center' | 'end';
   children?: PenNode[];

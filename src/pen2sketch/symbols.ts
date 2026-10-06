@@ -4,16 +4,22 @@
 import * as B from '../sketch/builder.ts';
 import type { PenInputNode } from '../pen/reader.ts';
 import type { Context } from './context.ts';
-import { NodeConverter, type Common, type ParentInfo } from './nodes.ts';
+import { layoutMode } from './layout.ts';
+import { NodeConverter, stackable, type Common, type ParentInfo } from './nodes.ts';
 import { paints, sketchColor, sketchPaint } from './paint.ts';
 import type { TreeBuilder, RNode } from './tree.ts';
 
 type J = Record<string, unknown>;
 
 /** Root properties of an instance that do not change how its content is drawn. */
-const ROOT_SAFE = new Set(['x', 'y', 'name', 'enabled', 'opacity', 'rotation', 'flipX', 'flipY', 'layoutPosition', 'width', 'height', 'context', 'metadata']);
-/** Descendant properties with a Sketch override (checked further below), or without visual effect. */
-const DESC_SAFE = new Set(['content', 'enabled', 'fill', 'stroke', 'name', 'x', 'y', 'width', 'height', 'context', 'metadata']);
+const ROOT_SAFE = new Set(['x', 'y', 'name', 'enabled', 'opacity', 'rotation', 'flipX', 'flipY', 'layoutPosition', 'width', 'height', 'context', 'metadata', 'theme']);
+/** Properties that change how a node is drawn and have no Sketch override. */
+const LOOK = [
+  'cornerRadius', 'strokeWidth', 'strokeAlignment', 'strokeLinecap', 'strokeLinejoin', 'opacity', 'rotation', 'flipX', 'flipY', 'clip',
+  'layout', 'gap', 'padding', 'justifyContent', 'alignItems', 'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing',
+  'lineHeight', 'textAlign', 'textAlignVertical', 'textGrowth', 'underline', 'strikethrough', 'geometry', 'viewBox', 'fillRule',
+  'polygonCount', 'innerRadius', 'startAngle', 'sweepAngle', 'library', 'icon', 'weight',
+];
 
 const near = (a: number, b: number) => Math.abs(a - b) < 0.01;
 
@@ -157,71 +163,99 @@ export class Symbols {
     return [layer];
   }
 
-  /** Sketch overrides for an instance, or null when Sketch could not draw it like pen.dev. */
+  /** Resolved properties that change how a node looks (besides fill, stroke, content and visibility). */
+  private look(n: RNode): string {
+    const v = this.ctx.vars;
+    const out: Record<string, unknown> = {};
+    for (const k of LOOK) if (n.p[k] !== undefined) out[k] = v.deep(n.p[k], n.theme);
+    return JSON.stringify(out);
+  }
+
+  private resolved(n: RNode, prop: string): string {
+    return JSON.stringify(this.ctx.vars.deep(n.p[prop], n.theme) ?? null);
+  }
+
+  /**
+   * Sketch overrides for an instance, or null when Sketch could not draw it like pen.dev. The instance is compared
+   * with the master node by node, with variables resolved in each one's theme: differences in text, visibility, a
+   * solid fill / text / border colour, an image or a nested symbol become overrides; anything else expands it.
+   * Geometry may differ inside stacks (Sketch lays them out again) and for the instance's own size; elsewhere it
+   * has to match because Sketch keeps the master's positions.
+   */
   private overrides(inst: RNode, m: Master, where: string): [string, unknown][] | null {
     const ctx = this.ctx;
     const v = ctx.vars;
-    const info = inst.instance!;
-    for (const k of Object.keys(info.rootProps)) if (!ROOT_SAFE.has(k)) return null;
-    if (!near(inst.w, m.tree.w) || !near(inst.h, m.tree.h)) return null;
-    if (JSON.stringify(inst.theme) !== JSON.stringify(m.tree.theme)) return null;
-    const masterNodes = new Map<string, RNode>();
+    const root = m.tree;
+    for (const k of Object.keys(inst.instance!.rootProps)) {
+      if (ROOT_SAFE.has(k)) continue;
+      // anything else on the instance itself has to resolve to what the master has
+      if (JSON.stringify(v.deep(inst.p[k], inst.theme)) !== JSON.stringify(v.deep(root.p[k], root.theme))) return null;
+    }
+    for (const k of ['fill', 'stroke', 'effect']) if (this.resolved(inst, k) !== this.resolved(root, k)) return null;
+    if (this.look(inst) !== this.look(root)) return null;
+    // a different size is re-laid out by Sketch only where the master is a stack or keeps its children in place
+    const rootRelayout = stackable(root, v) || layoutMode(root, v) === 'none';
+    if (!rootRelayout && (!near(inst.w, root.w) || !near(inst.h, root.h))) return null;
+
+    const out: [string, unknown][] = [];
+    const byRel = new Map<string, RNode>();
     const index = (n: RNode, prefix: string) => {
       for (const c of n.children) {
         const rel = prefix ? `${prefix}/${c.id}` : c.id;
-        masterNodes.set(rel, c);
+        byRel.set(rel, c);
         index(c, c.instance ? rel : prefix);
       }
     };
-    index(m.tree, '');
-    const out: [string, unknown][] = [];
+    index(root, '');
     let ok = true;
-    const visit = (n: RNode, prefix: string) => {
+    const fail = (why: string) => {
+      ok = false;
+      void why;
+    };
+    const visit = (n: RNode, mParent: RNode, prefix: string) => {
+      const relayout = stackable(mParent, v);
       for (const c of n.children) {
         if (!ok) return;
         const rel = prefix ? `${prefix}/${c.id}` : c.id;
-        const mn = masterNodes.get(rel);
-        if (!mn || mn.type !== c.type) return void (ok = false);
+        const mn = byRel.get(rel);
+        if (!mn || mn.type !== c.type) return fail(`structure ${rel}`);
         const path = rel.split('/').map((s) => ctx.uuid(s)).join('/');
-        // geometry must match – Sketch would draw the master's layout
-        if (c.visible && (!near(c.x, mn.x) || !near(c.y, mn.y) || !near(c.w, mn.w) || !near(c.h, mn.h))) return void (ok = false);
-        if (c.replaced) {
-          // a swapped nested instance
-          if (c.instance && mn.instance && Object.keys(c.instance.overrides).length === 0) {
-            const swap = this.master(c.instance.ref);
-            if (!swap) return void (ok = false);
-            out.push([`${path}_symbolID`, swap.symbolID]);
-            continue;
-          }
-          return void (ok = false);
-        }
         if (c.visible !== mn.visible) out.push([`${path}_isVisible`, c.visible]);
-        for (const prop of c.overridden ?? []) {
-          if (!DESC_SAFE.has(prop) && prop !== 'children') return void (ok = false);
-          if (prop === 'children') return void (ok = false);
-          if (prop === 'content') {
-            const text = v.string(c.p.content, c.theme) ?? '';
-            if (text !== (v.string(mn.p.content, mn.theme) ?? '')) out.push([`${path}_stringValue`, text]);
-          } else if (prop === 'fill') {
-            const o = this.paintOverride(c, mn, 'fill', path, where);
-            if (o === null) return void (ok = false);
-            out.push(...o);
-          } else if (prop === 'stroke') {
-            const o = this.paintOverride(c, mn, 'stroke', path, where);
-            if (o === null) return void (ok = false);
-            out.push(...o);
-          }
+        if (!c.visible) continue;
+        if (!relayout) {
+          const autoText = c.type === 'text' && !['fixed-width', 'fixed-width-height'].includes(String(v.value(c.p.textGrowth, c.theme))) && (v.value(c.p.textAlign, c.theme) ?? 'left') === 'left';
+          if (!near(c.x, mn.x) || !near(c.y, mn.y)) return fail(`position ${rel}`);
+          if (!autoText && (!near(c.w, mn.w) || !near(c.h, mn.h)) && !(c.type === 'frame' && (stackable(c, v) || layoutMode(c, v) === 'none'))) return fail(`size ${rel}`);
         }
-        if (c.instance && mn.instance && c.instance.ref !== mn.instance.ref) {
-          const swap = this.master(c.instance.ref);
-          if (!swap) return void (ok = false);
-          out.push([`${path}_symbolID`, swap.symbolID]);
+        if (c.instance || mn.instance) {
+          // a nested symbol: swapped for another one, and its own overrides
+          if (!c.instance || !mn.instance) return fail(`nested ${rel}`);
+          const sub = this.master(c.instance.ref);
+          if (!sub) return fail(`nested master ${rel}`);
+          if (c.instance.ref !== mn.instance.ref) out.push([`${path}_symbolID`, sub.symbolID]);
+          if (this.look(c) !== this.look(mn) || this.resolved(c, 'effect') !== this.resolved(mn, 'effect')) return fail(`nested look ${rel}`);
+          for (const k of ['fill', 'stroke']) if (this.resolved(c, k) !== this.resolved(sub.tree, k) && this.resolved(c, k) !== this.resolved(mn, k)) return fail(`nested paint ${rel}`);
+          // its content is compared with the master it shows now
+          const nested = this.overrides(c, sub, where);
+          if (!nested) return fail(`nested overrides ${rel}`);
+          for (const [name, value] of nested) out.push([`${path}/${name}`, value]);
           continue;
         }
-        visit(c, c.instance ? rel : prefix);
+        if (this.look(c) !== this.look(mn) || this.resolved(c, 'effect') !== this.resolved(mn, 'effect')) return fail(`look ${rel}`);
+        if (c.type === 'text') {
+          const text = v.string(c.p.content, c.theme) ?? '';
+          if (text !== (v.string(mn.p.content, mn.theme) ?? '')) out.push([`${path}_stringValue`, text]);
+        }
+        for (const prop of ['fill', 'stroke'] as const) {
+          if (this.resolved(c, prop) === this.resolved(mn, prop)) continue;
+          const o = this.paintOverride(c, mn, prop, path, where);
+          if (!o) return fail(`${prop} ${rel}`);
+          out.push(...o);
+        }
+        visit(c, mn, prefix);
       }
     };
-    visit(inst, '');
+    visit(inst, root, '');
     return ok ? out : null;
   }
 

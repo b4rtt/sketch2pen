@@ -5,7 +5,7 @@ import type { PenFile } from '../pen/reader.ts';
 import * as B from '../sketch/builder.ts';
 import { Context, DEFAULT_OPTIONS, type PenToSketchOptions } from './context.ts';
 import { cacheDir, FontLibrary } from './fonts.ts';
-import { loadIcons } from './icons.ts';
+import { loadIcons, type IconRequest } from './icons.ts';
 import { Layout } from './layout.ts';
 import { NodeConverter, PAGE } from './nodes.ts';
 import { sketchColor } from './paint.ts';
@@ -15,7 +15,6 @@ import { measureText, textProps } from './text.ts';
 import { TreeBuilder, walk, type RNode } from './tree.ts';
 import { Variables } from './variables.ts';
 import { paints } from './paint.ts';
-import { join } from 'node:path';
 
 type J = Record<string, unknown>;
 
@@ -24,6 +23,8 @@ export interface PenToSketchResult {
   files: Record<string, Uint8Array>;
   ctx: Context;
   pages: { name: string; layers: number }[];
+  /** top-level nodes and the Sketch layers they became (for verification) */
+  topLevel: { penId: string; sketchId: string; name: string; page: string }[];
 }
 
 /** Bounds supplied from outside (pen.dev's own layout, see tools): node key → box in the parent's coordinates. */
@@ -48,7 +49,7 @@ function pageBands(ctx: Context, roots: RNode[]): { name: string; nodes: RNode[]
     bands[i]!.nodes.push(n);
   }
   // the title is twice as tall as its text; content started one title height below it
-  for (const [i, b] of bands.entries()) b.dy = titles[i]!.y + Math.round(titles[i]!.h / 1.21) * 2;
+  for (const [i, b] of bands.entries()) b.dy = titles[i]!.y + 2 * (ctx.vars.number(titles[i]!.p.fontSize, titles[i]!.theme) ?? titles[i]!.h);
   return bands.filter((b) => b.nodes.length);
 }
 
@@ -64,15 +65,10 @@ export async function convertPen(pen: PenFile, options: Partial<PenToSketchOptio
   const ctx = new Context(pen, vars, fonts, report, opts);
   const fontRequests: { family: string; weight: number; italic: boolean }[] = [];
   const imageUrls: string[] = [];
-  const iconUrls: string[] = [];
   const collect = (n: RNode) => {
     if (n.type === 'text') {
       const t = textProps(ctx, n);
       fontRequests.push({ family: t.family, weight: t.weight, italic: t.italic });
-    }
-    if (n.type === 'icon') {
-      const u = ctx.iconUrlOf(n);
-      if (u) iconUrls.push(u);
     }
     for (const key of ['fill', 'stroke'] as const) {
       for (const p of paints(n.p[key])) {
@@ -84,13 +80,23 @@ export async function convertPen(pen: PenFile, options: Partial<PenToSketchOptio
   for (const r of roots) walk(r, collect);
   const symbols = new Symbols(ctx, builder);
   for (const c of symbols.components()) walk(c, collect);
-  await Promise.all([fonts.prepare(fontRequests), ctx.prefetch(imageUrls), loadIcons(iconUrls, join(cacheDir(), 'icons'), opts.download).then((m) => (ctx.icons = m))]);
+  await Promise.all([fonts.prepare(fontRequests), ctx.prefetch(imageUrls)]);
 
   // layout
   const layout = new Layout({ vars, measureText: (n, w) => measureText(ctx, n, w) });
   for (const r of roots) layout.run(r);
   for (const c of symbols.components()) layout.run(c);
   if (external) for (const r of roots) applyExternal(r, external);
+
+  // icons depend on their drawn size (optical sizes)
+  const iconRequests: IconRequest[] = [];
+  const collectIcons = (n: RNode) => {
+    const r = n.type === 'icon' ? ctx.iconRequest(n) : null;
+    if (r) iconRequests.push(r);
+  };
+  for (const r of roots) walk(r, collectIcons);
+  for (const c of symbols.components()) walk(c, collectIcons);
+  ctx.icons = await loadIcons(iconRequests, cacheDir(), opts.download);
 
   // colour variables → swatches
   const swatches: J[] = [];
@@ -107,8 +113,13 @@ export async function convertPen(pen: PenFile, options: Partial<PenToSketchOptio
   const conv = new NodeConverter(ctx);
   if (opts.symbols) symbols.attach(conv);
   const pages: B.PageSpec[] = [];
+  const topLevel: PenToSketchResult['topLevel'] = [];
   for (const band of pageBands(ctx, roots)) {
-    const layers = band.nodes.flatMap((n) => conv.convert(n, PAGE));
+    const layers = band.nodes.flatMap((n) => {
+      const out = conv.convert(n, PAGE);
+      if (out[0]) topLevel.push({ penId: n.id, sketchId: String(out[0].do_objectID), name: String(out[0].name), page: band.name });
+      return out;
+    });
     for (const l of layers) (l.frame as J).y = Math.round(((l.frame as J).y as number) - band.dy) || 0;
     pages.push({ name: band.name, layers, id: ctx.uuid(`page:${band.name}`) });
   }
@@ -143,7 +154,7 @@ export async function convertPen(pen: PenFile, options: Partial<PenToSketchOptio
     if (!names.includes(choice.postscriptName)) names.push(choice.postscriptName);
   }
   const doc = B.buildDocument(pages, files, { fontReferences, sharedSwatches: { _class: 'swatchContainer', do_objectID: ctx.uuid('swatches'), objects: swatches } }, ctx.uuid('document'));
-  return { files: doc, ctx, pages: pages.map((p) => ({ name: p.name, layers: p.layers.length })) };
+  return { files: doc, ctx, pages: pages.map((p) => ({ name: p.name, layers: p.layers.length })), topLevel };
 }
 
 /** Replaces computed boxes by pen.dev's own (positions are relative to the parent, like pen.dev reports them). */
