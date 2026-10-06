@@ -1,5 +1,5 @@
-// Generates complete, valid Sketch documents from code. Used by the feature lab to create test files that
-// Sketch itself can render (ground truth) – every field Sketch expects is filled with a neutral default.
+// Generates complete, valid Sketch documents from code: every field Sketch expects is filled with a neutral default.
+// Used by the pen.dev → Sketch converter and by the feature lab (test files that Sketch itself renders as ground truth).
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { strToU8, zipSync, zlibSync } from 'fflate';

@@ -35,7 +35,7 @@ SKETCH2PEN_REAL_FILE=~/Designs/App.sketch bun test
 
 The feature lab is the ground truth for rendering fidelity. `tools/lab/cases.ts` generates a Sketch document with one
 artboard per feature (gradients, shadows, masks, borders, text, symbols, stacks …) using the Sketch file-format
-builder in `tools/lab/builder.ts`. `bun run lab` then
+builder in `src/sketch/builder.ts` (also used by the pen.dev → Sketch converter). `bun run lab` then
 
 1. writes the lab to `lab-output/lab.sketch`,
 2. converts it,

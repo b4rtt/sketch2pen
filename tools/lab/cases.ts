@@ -1,6 +1,6 @@
 // Feature lab: one artboard per Sketch feature. Sketch renders them (ground truth), sketch2pen converts them and
 // the verify tool compares both renders. Run with `bun tools/lab/run.ts <workdir>`.
-import * as B from './builder.ts';
+import * as B from '../../src/sketch/builder.ts';
 
 type J = Record<string, unknown>;
 
