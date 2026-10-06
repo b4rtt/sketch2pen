@@ -21,6 +21,7 @@ bun run typecheck
 | `test/units.test.ts` | transforms, paths, colours and gradients, tints, font weights, symbol resizing, stacks, path operations |
 | `test/convert.test.ts` | end-to-end conversion of hand-built Sketch documents (`test/fixture.ts`) |
 | `test/lab.test.ts` | the feature lab document in the current and the pre-2025 Sketch format |
+| `test/pen2sketch.test.ts` | pen.dev → Sketch: reading, variables and themes, layout, instances, geometry, gradients, text, end-to-end and the pen.dev lab (offline, no installed fonts) |
 
 Every converted document is checked against the invariants in `test/invariants.ts`: unique ids without `/`, every
 `ref` and every override path resolves, font URLs are relative.
@@ -55,6 +56,33 @@ a percent; anything above 1 % deserves a look. `tools/lab/legacy.ts` rewrites th
 **Adding a feature:** add an artboard to `tools/lab/cases.ts`, run the lab, and add assertions for how the feature is
 represented to `test/lab.test.ts`.
 
+## pen.dev feature lab
+
+The other direction has its own lab: `tools/lab/pen-cases.ts` generates a pen.dev document with one frame per pen.dev
+feature (fills and gradients, strokes, effects, shapes and paths, text, flex layout, groups, components with overrides
+and swaps, themed variables, icons). `bun run lab:pen` converts it to Sketch, renders every frame with pen.dev (through
+its MCP server, ground truth) and with `sketchtool`, and writes `lab-output/pen/compare/compare.html`.
+
+```bash
+bun run lab:pen                  # or: bun tools/lab/pen-run.ts <workdir>
+open lab-output/pen/compare/compare.html
+```
+
+To compare a real document:
+
+```bash
+bun run compare:pen path/to/design.pen compare-output [--limit 20] [--no-symbols] [--no-stacks] [--skip-pen]
+```
+
+pen.dev renders a copy of the document from the work folder (relative urls made absolute), so the original is never
+opened. Small size differences in the report usually mean that pen.dev's export includes a shadow reaching past the
+frame while Sketch's artboard export is clipped; pen.dev exports are limited to 8192 pixels.
+
+Text metrics are the part most sensitive to pen.dev changes. The calibration behind `src/pen2sketch/text.ts` and
+`src/pen2sketch/googlefonts.ts` (line heights, baselines, the axis values of Google Fonts) was done by rendering
+grids of fonts, sizes and line heights in both apps and comparing the ink of every line; redo it after pen.dev changes
+its text rendering.
+
 ## Comparing a real document
 
 ```bash
@@ -77,15 +105,19 @@ The paths of the tools can be overridden with the `SKETCHTOOL` and `PEN_MCP_SERV
 ## Building
 
 ```bash
-bun run build:host    # dist/sketch2pen for this machine (+ the CoreText helper on macOS)
-bun run build         # all release artifacts in dist/release (the macOS app needs macOS)
+bun run build:host        # dist/sketch2pen for this machine (+ the CoreText helper on macOS)
+bash tools/build.sh --app # dist/Sketch Pen.app for this Mac (the app with the CLI for this architecture)
+bun run build             # all release artifacts in dist/release (the macOS app needs macOS)
 ```
+
+The app (`native/app/SketchPen.swift`) is a single SwiftUI file compiled with `swiftc`; it runs the bundled CLI with
+`--json` and shows its report. Set `SKETCH2PEN_CLI` to run it against another CLI binary while developing.
 
 `bun run build` produces:
 
 | Artifact | Contents |
 | --- | --- |
-| `Sketch-to-Pen-macos.zip` | the drag-and-drop app (AppleScript droplet with both CLI binaries and the helper) |
+| `Sketch-Pen-macos.zip` | the *Sketch ⇄ Pen* app (SwiftUI, universal) with both CLI binaries and the helper |
 | `sketch2pen-macos-arm64.zip`, `sketch2pen-macos-x64.zip` | CLI + universal CoreText helper |
 | `sketch2pen-linux-x64.tar.gz`, `sketch2pen-linux-arm64.tar.gz` | CLI |
 | `sketch2pen-windows-x64.zip` | CLI |

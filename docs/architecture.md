@@ -1,7 +1,8 @@
 # Architecture
 
 sketch2pen is a TypeScript program that runs on [Bun](https://bun.sh). The release binaries are the same code compiled
-with `bun build --compile`; on macOS a small Swift helper adds CoreText text layout.
+with `bun build --compile`; on macOS a small Swift helper adds CoreText text layout, and a SwiftUI app
+(`native/app/SketchPen.swift`) runs the CLI for both directions. The CLI picks the direction from the file extension.
 
 ```
 .sketch (zip)                                                   Design (Pen)/
@@ -17,7 +18,7 @@ with `bun build --compile`; on macOS a small Swift helper adds CoreText text lay
 
 | Path | Responsibility |
 | --- | --- |
-| `src/cli.ts` | command line, output folder, reports, opening pen.dev |
+| `src/cli.ts` | command line for both directions, output, reports, opening pen.dev / Sketch |
 | `src/sketch/reader.ts`, `types.ts` | unzipping and parsing `.sketch` files; typings of the Sketch file format |
 | `src/convert/document.ts` | the pipeline: swatches → variables, shared styles, fonts, CoreText pre-pass, symbol masters in dependency order, pages placed as canvas sections |
 | `src/convert/context.ts` | conversion state: options, report, deterministic ids, assets, lookup tables shared between passes |
@@ -33,11 +34,14 @@ with `bun build --compile`; on macOS a small Swift helper adds CoreText text lay
 | `src/convert/path.ts`, `src/util/pathops.ts` | SVG path generation and Skia PathOps wrappers |
 | `src/util/geom.ts` | matrices, Sketch ⇄ pen.dev transforms |
 | `src/util/image.ts` | PNG/JPEG decoding and PNG encoding (baked alpha masks) |
-| `src/pen/types.ts`, `writer.ts` | the pen.dev document schema and writing the output folder |
+| `src/pen/types.ts`, `writer.ts`, `reader.ts` | the pen.dev document schema, writing the output folder, reading `.pen` files (older schemas normalised) |
+| `src/sketch/builder.ts` | complete Sketch layers, styles and archives from code (pen.dev → Sketch, feature lab) |
+| `src/pen2sketch/` | pen.dev → Sketch, see below |
+| `src/util/fontmetrics.ts` | OpenType metrics: cmap, advances, GPOS / kern pair kerning, vertical metrics, TrueType outlines, GSUB ligatures |
 | `src/report.ts` | console summary, `report.html`, `report.json` |
 | `src/data/google-fonts.ts` | Google Fonts family list (generated) |
 
-## Conversion pipeline
+## Sketch → pen.dev pipeline
 
 1. **Read.** The archive is unzipped in memory. Very old files (Sketch 42 and earlier used a different format) are
    rejected with a clear message.
@@ -58,6 +62,33 @@ with `bun build --compile`; on macOS a small Swift helper adds CoreText text lay
 7. **Write.** `writePen` writes the `.pen` JSON, images, generated images (baked masks) and the fonts to ship.
 
 The converter is deterministic: node ids are hashes of Sketch object ids, so the same input produces the same output.
+
+## pen.dev → Sketch
+
+```
+.pen (JSON) ─ reader ─► TreeBuilder ─► Layout ─► NodeConverter / Symbols ─► builder ─► .sketch (zip)
+                           │              │            │
+                     Variables, themes   text metrics  FontLibrary (shipped / Google Fonts / installed), icons, images
+```
+
+| Path | Responsibility |
+| --- | --- |
+| `document.ts` | the pipeline; Sketch pages (sketch2pen page sections become pages again), swatches, embedded fonts and images |
+| `tree.ts` | the document as pen.dev draws it: instances expanded with overrides and replacements, themes, visibility |
+| `variables.ts` | variables, themed values, colours |
+| `layout.ts` | pen.dev's layout: flex frames, fit / fill sizing, groups, absolute children |
+| `textlayout.ts`, `text.ts` | text measurement and wrapping, text layers and the baseline calibration |
+| `fonts.ts`, `googlefonts.ts` | resolving fonts to the files pen.dev draws (Google Fonts at the axis values pen.dev uses), PostScript names, cache |
+| `nodes.ts` | nodes → Sketch layers: frames and stacks, groups, shapes, paths, placement (rotation, flips) |
+| `paint.ts` | fills, gradients (inverse of `src/convert/style.ts`), borders, shadows, blurs |
+| `svgpath.ts` | SVG path parsing, bounds, Sketch curve points, arcs and polygons |
+| `symbols.ts` | components → symbol masters, instances → symbol instances with overrides, or expanded |
+| `icons.ts` | icon-library nodes drawn from the icon fonts pen.dev uses |
+| `summary.ts`, `report.ts` | the conversion report |
+
+The conversion itself is synchronous; everything remote (Google Fonts, icon fonts, remote images) is loaded before it
+and cached in `~/Library/Caches/sketch2pen` (`$XDG_CACHE_HOME/sketch2pen`, `%LOCALAPPDATA%\sketch2pen`). Sketch object
+ids are derived from the pen.dev ids, so the same input gives the same output.
 
 ## Notes on the pen.dev format
 
@@ -82,6 +113,10 @@ directly. These are the behaviours the converter relies on, all verified by rend
   System fonts are not rendered. Variable fonts are rendered at their default optical size.
 - **Images** are referenced by relative URL.
 - pen.dev keeps open documents in memory; a file converted again must be closed and reopened.
+- **Layout defaults**: a frame without `layout` lays out its children horizontally and is as large as its content;
+  stroke alignment defaults to centre. Text boxes are whole pixels wide, lines as tall as the rounded line height.
+- **Google Fonts** are drawn from each family's variable font at its default axis values (`opsz` included).
+- **Icons** are drawn with icon fonts: lucide 0.563.0, Phosphor 1.4.2, Material Symbols at 90 % of the box, feather.
 
 ## Notes on the Sketch format
 
@@ -102,4 +137,5 @@ directly. These are the behaviours the converter relies on, all verified by rend
 Unit tests cover the geometry and parsing helpers; conversion tests run hand-built fixtures and the generated feature
 lab through the converter and check document invariants (unique ids, resolvable references and overrides, valid font
 entries) and key properties. Visual fidelity is measured with `tools/compare.ts`, which renders every artboard with
-Sketch (`sketchtool`) and pen.dev (through its MCP server) and diffs the images. See [development.md](development.md).
+Sketch (`sketchtool`) and pen.dev (through its MCP server) and diffs the images; `tools/compare-pen.ts` does the same
+for pen.dev → Sketch, with its own feature lab (`tools/lab/pen-cases.ts`). See [development.md](development.md).

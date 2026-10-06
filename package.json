@@ -1,7 +1,7 @@
 {
   "name": "sketch2pen",
-  "version": "1.1.0",
-  "description": "Convert Sketch (.sketch) designs directly into pen.dev (.pen) documents \u2013 no Figma in between.",
+  "version": "2.0.0",
+  "description": "Convert Sketch (.sketch) designs into pen.dev (.pen) documents and back \u2013 no Figma in between.",
   "keywords": [
     "sketch",
     "pen.dev",
@@ -9,6 +9,7 @@
     "design",
     "converter",
     "sketch-to-pen",
+    "pen-to-sketch",
     "design-migration"
   ],
   "homepage": "https://github.com/b4rtt/sketch2pen#readme",

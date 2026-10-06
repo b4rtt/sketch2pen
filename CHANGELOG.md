@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.0.0 – unreleased
+
+- **pen.dev → Sketch.** `sketch2pen Design.pen` writes `Design (Sketch).sketch`: frames and Sketch stacks with the
+  positions pen.dev computes, shapes, paths, gradients, strokes (also per side), shadows and blurs, text on the same
+  baselines, components as symbols with overrides and swaps (instances Sketch could not draw identically are
+  expanded), colour variables as swatches, themes, icons from the icon fonts pen.dev uses, and the fonts and images
+  the document needs embedded in the Sketch file. Google Fonts are embedded at the axis values pen.dev draws them
+  with. Documents created by sketch2pen get their pages back. Verified with a new feature lab (`bun run lab:pen`,
+  median 0.05 % of pixels differ) and real documents (`bun run compare:pen`).
+- **Sketch ⇄ Pen app.** A SwiftUI app replaces the AppleScript droplet: pick or drop a `.sketch` or `.pen` file,
+  switch the direction, set the options and convert; the window shows the report. English and Czech. The release
+  archive is now `Sketch-Pen-macos.zip`.
+- The CLI picks the direction from the file extension; new options `--no-symbols`, `--no-stacks`, `--offline` for
+  pen.dev → Sketch.
+
 ## 1.1.0 – 2026-09-29
 
 - **Underline and strikethrough are drawn.** pen.dev keeps them on the text without drawing them, so they become thin

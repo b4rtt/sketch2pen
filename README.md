@@ -2,7 +2,7 @@
 
 <h1 align="center">sketch2pen</h1>
 
-<p align="center">Convert Sketch designs into <a href="https://pen.dev">pen.dev</a> documents – directly, with no Figma in between.</p>
+<p align="center">Convert Sketch designs into <a href="https://pen.dev">pen.dev</a> documents – and pen.dev documents back into Sketch – directly, with no Figma in between.</p>
 
 <p align="center">
   <a href="https://github.com/b4rtt/sketch2pen/actions/workflows/ci.yml"><img src="https://github.com/b4rtt/sketch2pen/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -10,28 +10,32 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/b4rtt/sketch2pen" alt="MIT license"></a>
 </p>
 
-- **Native pen.dev documents.** Layers stay editable, symbols become components with overrides, Sketch Stacks become
-  flex layout, colour swatches become variables, fonts ship with the document.
-- **Pixel-close.** Every feature is verified against Sketch's own renderer: the median difference is **0.09 %** of pixels
-  across the feature lab and **0.6 %** across a real 386-artboard production design.
-- **Current Sketch files.** Sketch 2025/2026 documents (frames, stacks, tints, pins, smooth corners) as well as
-  older files saved by Sketch 43 or newer.
+- **Both directions.** Sketch → pen.dev and pen.dev → Sketch, from the command line or the *Sketch ⇄ Pen* app.
+- **Native documents.** Layers stay editable: symbols ⇄ components with overrides, Sketch Stacks ⇄ flex layout,
+  colour swatches ⇄ variables, fonts travel with the document.
+- **Pixel-close.** Every feature is verified against the renderers of both apps: Sketch → pen.dev differs by a median
+  of **0.09 %** of pixels across its feature lab and **0.6 %** across a real 386-artboard production design;
+  pen.dev → Sketch by **0.05 %** across its feature lab and **0.4–1 %** across real pen.dev documents.
+- **Current files.** Sketch 2025/2026 documents (frames, stacks, tints, pins, smooth corners) as well as older files
+  saved by Sketch 43 or newer; pen.dev documents up to schema 2.20 and older ones.
 
 ![The same Sketch features rendered by Sketch and by pen.dev after conversion](docs/images/lab-comparison.png)
 
 ## Install
 
-### macOS app (drag & drop)
+### macOS app
 
-1. Download **`Sketch-to-Pen-macos.zip`** from the [latest release](https://github.com/b4rtt/sketch2pen/releases/latest) and move
-   *Sketch to Pen* to your Applications folder.
-2. Drop a `.sketch` file onto the app (or open the app and pick a file). The converted document opens in pen.dev.
+1. Download **`Sketch-Pen-macos.zip`** from the [latest release](https://github.com/b4rtt/sketch2pen/releases/latest) and move
+   *Sketch Pen* to your Applications folder.
+2. Open the app, drop a `.sketch` or `.pen` file into its window (or click *Choose File…*), check the direction and the
+   options and click **Convert**. The result opens in pen.dev or Sketch; the window lists what was converted
+   approximately. Files dropped onto the app icon are converted right away.
 
 The app is not notarized by Apple, so macOS blocks it the first time: open **System Settings → Privacy & Security** and
 click **Open Anyway** – or remove the quarantine flag in Terminal:
 
 ```bash
-xattr -dr com.apple.quarantine "/Applications/Sketch to Pen.app"
+xattr -dr com.apple.quarantine "/Applications/Sketch Pen.app"
 ```
 
 ### Command line
@@ -74,6 +78,10 @@ bun src/cli.ts path/to/design.sketch
 
 ## Usage
 
+The direction follows the file extension.
+
+### Sketch → pen.dev
+
 ```bash
 sketch2pen "Design.sketch"
 ```
@@ -104,6 +112,27 @@ Design (Pen)/
 pen.dev has no pages, so every Sketch page becomes a titled section of one canvas; that keeps components linked across
 pages. pen.dev keeps open documents in memory – if you convert a file again while it is open, close and reopen it.
 
+### pen.dev → Sketch
+
+```bash
+sketch2pen "Design.pen"
+```
+
+This writes `Design (Sketch).sketch` next to the `.pen` file and opens it in Sketch. Images and the fonts the document
+uses are embedded in the Sketch file.
+
+| Option | Description |
+| --- | --- |
+| `-o, --out <file>` | output file (default: `<name> (Sketch).sketch` next to the `.pen` file) |
+| `--embed-fonts <mode>` | `document` (default): fonts shipped with the `.pen` file and Google Fonts · `all`: also fonts installed on this computer · `none`: embed no fonts |
+| `--no-symbols` | expand component instances instead of creating Sketch symbols |
+| `--no-stacks` | keep flex layout as fixed positions instead of Sketch stacks |
+| `--offline` | do not download Google Fonts, icons and remote images (uses the cache) |
+| `--no-open` | do not open the result in Sketch |
+| `--json` | print the conversion report as JSON |
+
+Documents that sketch2pen created from Sketch get their pages back.
+
 ## Fonts
 
 pen.dev loads [Google Fonts](https://fonts.google.com) by name. For every other font the converter picks the most
@@ -128,6 +157,8 @@ yourself.
 
 ## What gets converted
 
+### Sketch → pen.dev
+
 | Sketch | pen.dev |
 | --- | --- |
 | Pages, artboards / frames, groups | one canvas with a titled section per page, frames, groups |
@@ -146,9 +177,7 @@ yourself.
 
 [docs/conversion.md](docs/conversion.md) documents every mapping and how each emulation works.
 
-### Limitations
-
-These come from the pen.dev format and are listed in each conversion report:
+These limitations come from the pen.dev format and are listed in each conversion report:
 
 - underline and strikethrough are drawn as separate shapes (pen.dev does not draw them) – on macOS only;
 - texts and symbol instances reaching past a path- or ellipse-shaped mask are clipped by the mask's bounds;
@@ -156,12 +185,33 @@ These come from the pen.dev format and are listed in each conversion report:
 - prototype links, layout grids, guides and export presets are not converted;
 - text baselines can differ by up to 1 px for some size / line-height combinations.
 
+### pen.dev → Sketch
+
+| pen.dev | Sketch |
+| --- | --- |
+| Frames, groups, flex layout | artboards and frames, groups, stacks with the positions pen.dev computes |
+| Rectangles, ellipses (arcs, rings), polygons, paths | rectangles, ovals, polygons, shape paths and combined shapes |
+| Colour, gradient and image fills, strokes (also per side), shadows, blurs | fills, borders, shadows, blurs |
+| Text (fonts, line height, letter spacing, alignment, wrapping) | text layers on the same baselines |
+| Components and instances with overrides, nested components | symbols and instances with overrides and symbol swaps |
+| Colour variables, themes | colour swatches, values resolved per theme |
+| Icons (lucide, feather, Material Symbols, Phosphor) | vector shapes from the icon fonts pen.dev uses |
+| Fonts shipped with the document, Google Fonts | fonts embedded in the Sketch document |
+
+pen.dev's layout is re-computed (text measured with the same font files) so every layer lands where pen.dev draws it.
+Instances Sketch could not draw exactly like pen.dev (e.g. a different background on the instance itself) are
+expanded into plain layers; mesh gradients and shader fills have no Sketch equivalent. See
+[docs/pen-to-sketch.md](docs/pen-to-sketch.md).
+
 ## How it works
 
-The converter reads the `.sketch` archive (JSON + images + fonts), converts the layer tree into pen.dev's node schema and
-writes a `.pen` file that pen.dev opens directly. Geometry that pen.dev cannot express natively is computed with
-[Skia PathOps](https://skia.org/docs/user/modules/pathkit/) (booleans, dashes, markers, mask intersections); text is laid
-out with CoreText exactly like Sketch does. See [docs/architecture.md](docs/architecture.md).
+**Sketch → pen.dev:** the converter reads the `.sketch` archive (JSON + images + fonts), converts the layer tree into
+pen.dev's node schema and writes a `.pen` file that pen.dev opens directly. Geometry that pen.dev cannot express
+natively is computed with [Skia PathOps](https://skia.org/docs/user/modules/pathkit/) (booleans, dashes, markers, mask
+intersections); text is laid out with CoreText exactly like Sketch does.
+
+**pen.dev → Sketch:** the `.pen` document is expanded (component instances, themes), laid out like pen.dev does it and
+written as a Sketch document with the fonts and images it needs. See [docs/architecture.md](docs/architecture.md).
 
 ## Development
 
@@ -170,7 +220,9 @@ bun install
 bun test            # unit and conversion tests
 bun run typecheck
 bun run build       # release artifacts in dist/
-bun run lab         # render every feature in Sketch and pen.dev and diff them (macOS, needs both apps)
+bun run lab         # Sketch → pen.dev feature lab: render every feature in both apps and diff them (macOS)
+bun run lab:pen     # the same for pen.dev → Sketch
+bash tools/build.sh --app   # build the macOS app for this Mac into dist/
 ```
 
 [docs/development.md](docs/development.md) covers the feature lab, the comparison tool and releasing.
