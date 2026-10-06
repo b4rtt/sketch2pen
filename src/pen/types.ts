@@ -1,5 +1,5 @@
-// Subset of the .pen document schema (version 2.18) produced by the converter.
-// Source of truth: the pen.dev `pen-schema.md` skill document.
+// The .pen document schema: everything the Sketch → pen.dev converter writes (version 2.18) and the pen.dev → Sketch
+// converter reads (up to 2.19). Source of truth: the pen.dev `pen-schema.md` skill document.
 
 export type Sizing = number | string; // number or 'fit_content' / 'fill_container'
 
@@ -22,7 +22,18 @@ export type PenFill =
       blendMode?: PenBlendMode;
       enabled?: boolean;
     }
-  | { type: 'image'; url: string; mode?: 'stretch' | 'fill' | 'fit'; opacity?: number; blendMode?: PenBlendMode; enabled?: boolean };
+  | { type: 'image'; url: string; mode?: 'stretch' | 'fill' | 'fit'; opacity?: number; blendMode?: PenBlendMode; enabled?: boolean }
+  | { type: 'shader'; url: string; opacity?: number; blendMode?: PenBlendMode; enabled?: boolean; uniforms?: Record<string, unknown> }
+  | {
+      type: 'mesh_gradient';
+      columns?: number;
+      rows?: number;
+      colors?: string[];
+      points?: unknown[];
+      opacity?: number;
+      blendMode?: PenBlendMode;
+      enabled?: boolean;
+    };
 
 export type PenEffect =
   | { type: 'blur'; radius: number; enabled?: boolean }
@@ -40,8 +51,16 @@ export type PenEffect =
 
 export type StrokeWidth = number | { top?: number; right?: number; bottom?: number; left?: number };
 
+export type PenNodeType =
+  | 'frame' | 'group' | 'rectangle' | 'ellipse' | 'path' | 'polygon' | 'text' | 'ref'
+  // read only: canvas annotations, icon-library glyphs, generated content and live web pages
+  | 'note' | 'prompt' | 'context' | 'icon' | 'script' | 'browser';
+
+/** Theme axis → value, e.g. { mode: 'dark' }. */
+export type PenTheme = Record<string, string>;
+
 export interface PenNode {
-  type: 'frame' | 'group' | 'rectangle' | 'ellipse' | 'path' | 'polygon' | 'text' | 'ref';
+  type: PenNodeType;
   id: string;
   name?: string;
   x?: number;
@@ -55,6 +74,9 @@ export interface PenNode {
   enabled?: boolean;
   layoutPosition?: 'auto' | 'absolute';
   reusable?: boolean;
+  /** theme axis values for this subtree (variables resolve against them) */
+  theme?: PenTheme;
+  metadata?: { type: string; [key: string]: unknown };
 
   fill?: PenFill | PenFill[];
   stroke?: PenFill | PenFill[];
@@ -73,6 +95,9 @@ export interface PenNode {
   justifyContent?: 'start' | 'center' | 'end' | 'space_between' | 'space_around';
   alignItems?: 'start' | 'center' | 'end';
   children?: PenNode[];
+  layoutIncludeStroke?: boolean;
+  slot?: false | string[];
+  placeholder?: boolean;
 
   // path
   geometry?: string;
@@ -100,6 +125,16 @@ export interface PenNode {
   // polygon / ellipse
   polygonCount?: number;
   innerRadius?: number;
+  startAngle?: number;
+  sweepAngle?: number;
+
+  // icon
+  library?: string;
+  icon?: string;
+  weight?: number;
+
+  // browser
+  url?: string;
 }
 
 /** A font file shipped with the document (pen.dev's document font library). */
@@ -112,9 +147,18 @@ export interface PenFont {
   axes?: { tag: string; start: number; end: number }[];
 }
 
+export type PenVariableValue = unknown | { value: unknown; theme?: PenTheme }[];
+
+export interface PenVariable {
+  type: 'color' | 'number' | 'string' | 'boolean';
+  value: PenVariableValue;
+}
+
 export interface PenDocument {
-  version: '2.18';
+  version: string;
   fonts?: PenFont[];
-  variables?: Record<string, { type: 'color' | 'number' | 'string' | 'boolean'; value: unknown }>;
+  themes?: Record<string, string[]>;
+  imports?: Record<string, string>;
+  variables?: Record<string, PenVariable>;
   children: PenNode[];
 }

@@ -448,39 +448,43 @@ export function png(width: number, height: number, pixel: (x: number, y: number)
 export interface PageSpec {
   name: string;
   layers: J[];
+  /** object id of the page (random when omitted) */
+  id?: string;
 }
 
-/** Writes a .sketch file (Sketch 2025.3 format) with the given pages and extra archive files. */
-export function writeDocument(path: string, pages: PageSpec[], files: Record<string, Uint8Array> = {}, documentExtra: J = {}): void {
+/** Archive entries of a .sketch file (Sketch 2025.3 format) with the given pages and extra archive files. */
+export function buildDocument(pages: PageSpec[], files: Record<string, Uint8Array> = {}, documentExtra: J = {}, documentId: string = uuid()): Record<string, Uint8Array> {
   const zip: Record<string, Uint8Array> = { ...files };
   const pagesAndArtboards: J = {};
   const refs = pages.map((p) => {
-    const id = uuid();
+    const id = p.id ?? uuid();
     const page = layer('page', p.name, [0, 0, 0, 0], { extra: { ...groupFields(0, 0), layers: p.layers } });
     page.do_objectID = id;
+    (page.style as J).do_objectID = `${id.slice(0, -4)}5717`;
     zip[`pages/${id}.json`] = strToU8(JSON.stringify(page));
     const boards: J = {};
     for (const l of p.layers) boards[String(l.do_objectID)] = { name: l.name };
     pagesAndArtboards[id] = { name: p.name, artboards: boards };
     return { _class: 'MSJSONFileReference', _ref_class: 'MSImmutablePage', _ref: `pages/${id}` };
   });
+  const sub = (suffix: string) => `${documentId.slice(0, -2)}${suffix}`;
   const document = {
     _class: 'document',
-    do_objectID: uuid(),
+    do_objectID: documentId,
     colorSpace: 1,
     currentPageIndex: 0,
-    assets: { _class: 'assetCollection', do_objectID: uuid(), images: [], colorAssets: [], exportPresets: [], gradientAssets: [], imageCollection: { _class: 'imageCollection', images: {} }, colors: [], gradients: [] },
+    assets: { _class: 'assetCollection', do_objectID: sub('A1'), images: [], colorAssets: [], exportPresets: [], gradientAssets: [], imageCollection: { _class: 'imageCollection', images: {} }, colors: [], gradients: [] },
     fontReferences: [],
     foreignLayerStyles: [],
     foreignSwatches: [],
     foreignSymbols: [],
     foreignTextStyles: [],
     foreignVariantSets: [],
-    layerStyles: { _class: 'sharedStyleContainer', do_objectID: uuid(), objects: [] },
-    layerTextStyles: { _class: 'sharedTextStyleContainer', do_objectID: uuid(), objects: [] },
+    layerStyles: { _class: 'sharedStyleContainer', do_objectID: sub('A2'), objects: [] },
+    layerTextStyles: { _class: 'sharedTextStyleContainer', do_objectID: sub('A3'), objects: [] },
     pages: refs,
     perDocumentLibraries: [],
-    sharedSwatches: { _class: 'swatchContainer', do_objectID: uuid(), objects: [] },
+    sharedSwatches: { _class: 'swatchContainer', do_objectID: sub('A4'), objects: [] },
     documentState: { _class: 'documentState' },
     ...documentExtra,
   };
@@ -488,5 +492,17 @@ export function writeDocument(path: string, pages: PageSpec[], files: Record<str
   zip['document.json'] = strToU8(JSON.stringify(document));
   zip['meta.json'] = strToU8(JSON.stringify({ ...app, autosaved: 0, created: app, saveHistory: ['NONAPPSTORE.221297'], pagesAndArtboards }));
   zip['user.json'] = strToU8(JSON.stringify({ document: { pageListHeight: 85, pageListCollapsed: 0 } }));
-  writeFileSync(path, zipSync(zip, { level: 0 }));
+  return zip;
+}
+
+/** Compresses archive entries into .sketch file bytes (images and fonts are stored, JSON is deflated). */
+export function zipDocument(zip: Record<string, Uint8Array>): Uint8Array {
+  const entries: Record<string, [Uint8Array, { level: 0 | 6 }]> = {};
+  for (const [name, data] of Object.entries(zip)) entries[name] = [data, { level: name.endsWith('.json') ? 6 : 0 }];
+  return zipSync(entries);
+}
+
+/** Writes a .sketch file (Sketch 2025.3 format) with the given pages and extra archive files. */
+export function writeDocument(path: string, pages: PageSpec[], files: Record<string, Uint8Array> = {}, documentExtra: J = {}): void {
+  writeFileSync(path, zipSync(buildDocument(pages, files, documentExtra), { level: 0 }));
 }

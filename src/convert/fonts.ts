@@ -252,7 +252,7 @@ export function facesFromBytes(data: Uint8Array): FontFace[] {
   }
 }
 
-function facesFromFile(path: string): FontFace[] {
+export function facesFromFile(path: string): FontFace[] {
   let fd = -1;
   try {
     fd = openSync(path, 'r');
@@ -276,6 +276,20 @@ export function systemFontDirs(): string[] {
 }
 
 type Hit = { face: FontFace; file: FontFile; instance?: boolean };
+
+/** Every face of the fonts installed on this computer (static faces, variable fonts and collections). */
+export function installedFonts(dirs: string[] = systemFontDirs()): { face: FontFace; file: FontFile }[] {
+  const seen = new Set<string>();
+  const out: { face: FontFace; file: FontFile }[] = [];
+  for (const hit of scanInstalled(dirs).values()) {
+    if (hit.instance) continue;
+    const key = `${hit.file.path}#${hit.file.faceIndex}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ face: hit.face, file: hit.file });
+  }
+  return out;
+}
 
 /** The face as a named instance of its variable font presents it: own PostScript name, style and weight. */
 function instanceFace(face: FontFace, inst: FontInstance): FontFace {
