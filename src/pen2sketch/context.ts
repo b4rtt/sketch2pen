@@ -19,6 +19,8 @@ export interface PenToSketchOptions {
   download: boolean;
   /** which fonts are embedded in the Sketch document */
   embedFonts: import('./fonts.ts').EmbedMode;
+  /** font folders searched for installed fonts (default: the platform's) */
+  fontDirs?: string[];
 }
 
 export const DEFAULT_OPTIONS: PenToSketchOptions = { stacks: true, symbols: true, download: true, embedFonts: 'document' };

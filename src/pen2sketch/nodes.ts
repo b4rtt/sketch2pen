@@ -75,7 +75,7 @@ function sizing(ctx: Context, n: RNode, parent: ParentInfo): [number, number] {
 }
 
 function commonOptions(ctx: Context, n: RNode, parent: ParentInfo): Common {
-  const name = ctx.vars.string(n.p.name, n.theme) ?? defaultName(n);
+  const name = ctx.vars.string(n.p.name, n.theme) ?? defaultName(ctx, n);
   const where = parent.path ? `${parent.path} / ${name}` : name;
   const place = placement(ctx, n, parent);
   const opacity = ctx.vars.number(n.p.opacity, n.theme);
@@ -95,7 +95,12 @@ function commonOptions(ctx: Context, n: RNode, parent: ParentInfo): Common {
   return { name, frame: place.frame, options, where };
 }
 
-function defaultName(n: RNode): string {
+function defaultName(ctx: Context, n: RNode): string {
+  // unnamed texts are listed by their content, like in pen.dev
+  if (n.type === 'text') {
+    const text = (ctx.vars.string(n.p.content, n.theme) ?? '').split('\n')[0]!.trim();
+    if (text) return text.length > 40 ? `${text.slice(0, 40)}…` : text;
+  }
   const names: Record<string, string> = { frame: 'Frame', group: 'Group', rectangle: 'Rectangle', ellipse: 'Ellipse', path: 'Path', polygon: 'Polygon', text: 'Text', icon: 'Icon', ref: 'Instance' };
   return names[n.type] ?? n.type;
 }

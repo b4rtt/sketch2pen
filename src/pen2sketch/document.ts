@@ -61,7 +61,7 @@ export async function convertPen(pen: PenFile, options: Partial<PenToSketchOptio
   const { roots } = builder.build();
 
   // fonts, images and icons are loaded up front – the conversion itself is synchronous
-  const fonts = new FontLibrary(pen, { embed: opts.embedFonts, download: opts.download }, report);
+  const fonts = new FontLibrary(pen, { embed: opts.embedFonts, download: opts.download, dirs: opts.fontDirs }, report);
   const ctx = new Context(pen, vars, fonts, report, opts);
   const fontRequests: { family: string; weight: number; italic: boolean }[] = [];
   const imageUrls: string[] = [];
