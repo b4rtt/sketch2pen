@@ -237,7 +237,7 @@ export class NodeConverter {
       ctx.report.stats.stacks++;
     }
     const layer = B.frame(c.name, c.frame, [...children, ...sides], options);
-    if (!parent.path) ctx.report.stats.artboards++;
+    if (!parent.path && n.p.reusable !== true) ctx.report.stats.artboards++;
     return [this.ids(layer, n.key)];
   }
 

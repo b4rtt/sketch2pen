@@ -247,3 +247,5 @@ export function buildPenLab(dir: string): { file: string; frames: number } {
   writeFileSync(file, JSON.stringify(doc, null, 1));
   return { file, frames: frames.length };
 }
+
+if (import.meta.main) console.log(buildPenLab(process.argv[2] ?? 'pen-lab').file);

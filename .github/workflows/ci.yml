@@ -58,3 +58,12 @@ jobs:
           test -s lab-out/lab.pen
           test -s lab-out/report.html
           bun -e "const r = await Bun.file('lab-out/report.json').json(); if (!r.stats?.frames) throw new Error('empty conversion'); console.log(r.stats)"
+      - name: Convert the pen.dev feature lab back to Sketch with the binary
+        run: |
+          bun tools/lab/pen-cases.ts pen-lab
+          ./dist/sketch2pen pen-lab/pen-lab.pen --out pen-lab.sketch --offline --no-open --json > pen-lab.json
+          test -s pen-lab.sketch
+          bun -e "const r = await Bun.file('pen-lab.json').json(); if (!r.stats?.artboards) throw new Error('empty conversion'); console.log(r.stats)"
+      - name: Build the macOS app
+        if: runner.os == 'macOS'
+        run: swiftc -parse-as-library -O native/app/SketchPen.swift -o dist/SketchPen
