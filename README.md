@@ -23,7 +23,7 @@
 
 ## Status
 
-Both directions and the app are complete as of version 2.0.0: Sketch → pen.dev, pen.dev → Sketch, the *Sketch ⇄ Pen*
+Both directions and the app are complete (since version 2.0.0): Sketch → pen.dev, pen.dev → Sketch, the *Sketch ⇄ Pen*
 app for macOS and the command line for macOS, Linux and Windows. What a format cannot express is listed in the
 limitations below and in every conversion report.
 

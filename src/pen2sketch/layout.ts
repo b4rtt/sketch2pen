@@ -246,7 +246,9 @@ export class Layout {
     }
     if (innerMain === undefined) innerMain = used;
     if (innerCross === undefined) {
-      innerCross = Math.max(0, ...flow.map((c) => size(c, crossAxis)));
+      // a hugging frame is as large as the children with their own cross size; the ones that fill only stretch
+      const own = flow.filter((c) => !fillsCross(c));
+      innerCross = Math.max(0, ...(own.length ? own : flow).map((c) => size(c, crossAxis)));
       // a hugging frame: children that fill the cross axis stretch to the largest sibling
       for (const c of flow) if (fillsCross(c) && Math.abs(size(c, crossAxis) - innerCross) > 1e-6) lay(c, fillsMain(c) ? size(c, mainAxis) : undefined, innerCross);
     }
@@ -263,7 +265,8 @@ export class Layout {
     let between = gap;
     if (justify === 'center') cursor = free / 2;
     else if (justify === 'end') cursor = free;
-    else if (justify === 'space_between' && flow.length > 1 && free > 0) between = gap + free / (flow.length - 1);
+    // space_between spreads the room left by the items themselves – the gap does not count (it may not even fit)
+    else if (justify === 'space_between' && flow.length > 1) between = (free + gaps) / (flow.length - 1);
     else if (justify === 'space_around' && flow.length && free > 0) {
       cursor = free / flow.length / 2;
       between = gap + free / flow.length;

@@ -54,7 +54,7 @@ export type StrokeWidth = number | { top?: number; right?: number; bottom?: numb
 export type PenNodeType =
   | 'frame' | 'group' | 'rectangle' | 'ellipse' | 'path' | 'polygon' | 'text' | 'ref'
   // read only: canvas annotations, icon-library glyphs, generated content and live web pages
-  | 'note' | 'prompt' | 'context' | 'icon' | 'script' | 'browser';
+  | 'note' | 'prompt' | 'context' | 'icon' | 'script' | 'browser' | 'line';
 
 /** Theme axis → value, e.g. { mode: 'dark' }. */
 export type PenTheme = Record<string, string>;

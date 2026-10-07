@@ -200,7 +200,13 @@ export function sketchPaint(ctx: Context, paint: unknown, theme: PenTheme, box: 
     }
     case 'image': {
       const url = vars.string(p.url, theme);
-      if (!url) break;
+      if (!url) {
+        // no image yet: pen.dev shows its checkerboard placeholder (the outline comes with the borders)
+        ctx.report.warn('image-placeholder', 'Image fill without an image drawn as pen.dev’s placeholder (checkerboard and outline)', where);
+        out = B.fill(B.color(0, 0, 0), { image: ctx.placeholderImage().ref, patternFillType: 0, opacity, blend });
+        out.patternTileScale = 0.5;
+        break;
+      }
       const asset = ctx.image(url, where);
       if (!asset) break;
       const mode = vars.value(p.mode, theme);
@@ -223,6 +229,19 @@ export function sketchPaint(ctx: Context, paint: unknown, theme: PenTheme, box: 
   }
   if (out && !enabled) out.isEnabled = false;
   return out;
+}
+
+/** Whether a node has an enabled image fill without an image (pen.dev draws a placeholder with an outline). */
+export function hasImagePlaceholder(ctx: Context, n: RNode): boolean {
+  return paints(n.p.fill).some((p) => {
+    const v = ctx.vars.value(p, n.theme) as J | undefined;
+    return !!v && typeof v === 'object' && v.type === 'image' && !ctx.vars.string(v.url, n.theme) && ctx.vars.bool(v.enabled, n.theme) !== false;
+  });
+}
+
+/** The outline of pen.dev's image placeholder: 1 pt #808080 inside the shape, below the node's own strokes. */
+export function placeholderBorder(): J {
+  return B.border(B.color(128 / 255, 128 / 255, 128 / 255), 1, 1);
 }
 
 export function sketchFills(ctx: Context, n: RNode, value: unknown, where: string): J[] {

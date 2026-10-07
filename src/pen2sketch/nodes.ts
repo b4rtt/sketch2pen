@@ -3,7 +3,7 @@ import * as B from '../sketch/builder.ts';
 import { apply, rotateCCW, multiply, type Matrix } from '../util/geom.ts';
 import type { Context } from './context.ts';
 import { layoutMode, sizeSpec, inFlow, padding, type LayoutMode } from './layout.ts';
-import { sketchEffects, sketchFills, sketchPaint, sketchStroke, type StrokeInfo } from './paint.ts';
+import { hasImagePlaceholder, placeholderBorder, sketchEffects, sketchFills, sketchPaint, sketchStroke, type StrokeInfo } from './paint.ts';
 import { curvePoints, ellipseArcPath, mapSubpaths, parsePath, pathBounds, polygonPoints, type CurvePoint, type P, type Subpath } from './svgpath.ts';
 import { baselineOffset, textLayer, textProps } from './text.ts';
 import type { RNode } from './tree.ts';
@@ -124,7 +124,7 @@ function styleOf(ctx: Context, n: RNode, c: Common, stroke: StrokeInfo | null, f
   return {
     ...c.options.style,
     fills,
-    borders: stroke?.borders ?? [],
+    borders: [...(hasImagePlaceholder(ctx, n) ? [placeholderBorder()] : []), ...(stroke?.borders ?? [])],
     shadows: fx.shadows,
     blurs: fx.blurs,
     ...(stroke ? { cap: stroke.cap, join: stroke.join } : {}),
@@ -185,6 +185,8 @@ export class NodeConverter {
         const frame: B.Frame = Math.abs(shift) > 1e-3 ? [c.frame[0], r(c.frame[1] + shift), c.frame[2], c.frame[3]] : c.frame;
         return [this.ids(textLayer(ctx, n, { name: c.name, frame, sizing: c.options.sizing as [number, number], layerOptions: { ...c.options, style: styleOf(ctx, n, c, sketchStroke(ctx, n, c.where), []) } }, c.where), n.key)];
       }
+      case 'line':
+        return this.line(n, c);
       case 'note':
       case 'prompt':
       case 'context':
@@ -355,6 +357,14 @@ export class NodeConverter {
     const stroke = sketchStroke(ctx, n, c.where, open);
     const fillRule = v.value(n.p.fillRule, n.theme) === 'evenodd' ? 'evenodd' : 'nonzero';
     return [this.shape(n, c, subs, vb, fillRule, styleOf(ctx, n, c, stroke, fills))];
+  }
+
+  /** A line across its box, from the top-left to the bottom-right corner (a divider when the box is flat). */
+  private line(n: RNode, c: Common): J[] {
+    const ctx = this.ctx;
+    const stroke = sketchStroke(ctx, n, c.where, true);
+    const subs = parsePath(`M0 0L${r(n.w)} ${r(n.h)}`);
+    return [this.shape(n, c, subs, { x: 0, y: 0, w: n.w, h: n.h }, 'nonzero', styleOf(ctx, n, c, stroke, []))];
   }
 
   /**

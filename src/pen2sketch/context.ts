@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { localPath, type PenFile } from '../pen/reader.ts';
+import { encodePng } from '../util/image.ts';
 import type { FontLibrary } from './fonts.ts';
 import { iconKey, type IconRequest, type IconSvg } from './icons.ts';
 import type { Report } from './report.ts';
@@ -119,6 +120,29 @@ export class Context {
   icon(n: RNode): IconSvg | null {
     const r = this.iconRequest(n);
     return r ? (this.icons.get(iconKey(r)) ?? null) : null;
+  }
+
+  private placeholder: ImageAsset | null = null;
+
+  /**
+   * The checkerboard pen.dev draws for an image fill without an image: 8 pt squares, every other one #808080 at 20 %,
+   * starting at the layer's top-left corner. One 16 pt tile at twice the resolution (drawn at half scale).
+   */
+  placeholderImage(): ImageAsset {
+    if (!this.placeholder) {
+      const size = 32;
+      const data = new Uint8Array(size * size * 4);
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          if (((x >> 4) + (y >> 4)) % 2 === 0) continue;
+          data.set([128, 128, 128, 51], (y * size + x) * 4);
+        }
+      }
+      const png = encodePng({ width: size, height: size, data });
+      this.placeholder = { ref: `images/${createHash('sha1').update(png).digest('hex')}.png`, data: png };
+      this.images.set('#placeholder', this.placeholder);
+    }
+    return this.placeholder;
   }
 
   /** Stores an image for the Sketch document; null when it cannot be read or converted. */

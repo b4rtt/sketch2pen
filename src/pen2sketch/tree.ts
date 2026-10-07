@@ -133,7 +133,10 @@ export class TreeBuilder {
     const r: RNode = { key, id: raw.id, type: component.type, p, children: [], parent, theme: {}, owner, rel, x: 0, y: 0, w: 0, h: 0, visible: true };
     r.instance = { ref: refId, component, rootProps, overrides: {} };
     if (Object.keys(rootProps).length) r.overridden = new Set(Object.keys(rootProps));
-    r.children = (base.children ?? []).map((c) => this.node(c as PenInputNode, r, `${key}/${c.id}`, r, c.id, depth + 1));
+    // an instance may bring its own children – the content of a slot component (tables, lists, menus)
+    const own = Array.isArray(raw.children) ? (raw.children as PenInputNode[]) : null;
+    if (own) r.overridden = new Set([...(r.overridden ?? []), 'children']);
+    r.children = (own ?? (base.children as PenInputNode[] | undefined) ?? []).map((c) => this.node(c, r, `${key}/${c.id}`, r, c.id, depth + 1));
     this.applyOverrides(r, (raw.descendants as Record<string, Record<string, unknown>>) ?? {}, depth);
     return r;
   }

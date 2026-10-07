@@ -34,6 +34,9 @@ layer is:
 - frames lay out their children **horizontally unless `layout` says otherwise**, size to their content by default,
   and share free space among `fill_container` children; `gap`, `padding`, `justifyContent` and `alignItems` as in
   pen.dev; children with `layoutPosition: absolute` and disabled children are not part of the flow;
+- a frame that sizes to its content takes its cross size from the children that do not fill it – the filling ones
+  stretch to it; `space_between` spreads the room left by the items and ignores `gap`;
+- instances of slot components bring their own children (tables, rows, cells, menus);
 - groups are as large as their children;
 - texts are measured with the font files pen.dev uses (see [Fonts](#fonts)): advances and pair kerning (GPOS),
   letter spacing after every character, greedy wrapping at spaces and hyphens, widths rounded up to whole pixels and
@@ -57,6 +60,7 @@ paints stack items in reverse order). `--no-stacks` keeps all frames fixed.
 | Linear / radial gradient | gradient with the identical colour ramp (pen.dev defines gradients in the unit square stretched over the box, Sketch in pixels) |
 | Angular gradient | angular gradient; a rotation shifts the stops (Sketch's start at 3 o'clock) |
 | Image fill (fill, fit, stretch, opacity) | pattern fill; WebP, GIF, HEIC images are converted to PNG on macOS |
+| Image fill without an image (e.g. a generated avatar) | pen.dev's placeholder: a tiled checkerboard (8 pt squares) and a 1 pt grey outline – replace the image in Sketch |
 | Mesh gradient | linear gradient of its colours (reported) |
 | Shader fill | left out (reported) |
 | Stroke: paints, width, alignment (default centre), caps, joins | borders |
@@ -121,6 +125,7 @@ report), so the design never changes. `--no-symbols` expands all instances.
 | --- | --- |
 | `missing-font`, `missing-font-file`, `variable-font` | font not available, shipped font file missing, variable font between named instances |
 | `missing-image`, `image-format` | image not found, image format Sketch cannot store |
+| `image-placeholder` | image fill without an image, drawn as pen.dev's placeholder |
 | `missing-component`, `override-missing` | instance of a missing / imported component, override for a layer the component does not have |
 | `side-stroke-radius` | per-side stroke on a rounded shape drawn with square corners |
 | `shadow-spread` | spread on a shadow (pen.dev does not draw it) |

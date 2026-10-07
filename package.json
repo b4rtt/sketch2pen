@@ -1,6 +1,6 @@
 {
   "name": "sketch2pen",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Convert Sketch (.sketch) designs into pen.dev (.pen) documents and back \u2013 no Figma in between.",
   "keywords": [
     "sketch",

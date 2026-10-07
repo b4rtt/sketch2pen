@@ -162,6 +162,19 @@ describe('layout', () => {
     expect(f!.h).toBe(34);
   });
 
+  test('a hugging row is as tall as its children that do not fill; filling ones stretch to it', () => {
+    const [f] = laidOut(
+      doc([{ type: 'frame', id: 'row', children: [{ type: 'rectangle', id: 'a', width: 20, height: 40 }, { type: 'frame', id: 'b', height: 'fill_container', layout: 'vertical', children: [{ type: 'rectangle', id: 'c', width: 10, height: 90 }] }] }]),
+    );
+    expect(f!.h).toBe(40);
+    expect(f!.children[1]!.h).toBe(40);
+  });
+
+  test('space_between spreads the free room and ignores a gap that does not fit', () => {
+    const [f] = laidOut(doc([{ type: 'frame', id: 'f', width: 100, height: 10, gap: 320, justifyContent: 'space_between', children: [{ type: 'rectangle', id: 'a', width: 30, height: 10 }, { type: 'rectangle', id: 'b', width: 16, height: 10 }] }]));
+    expect(box(f!.children[1]!)).toEqual([84, 0, 16, 10]);
+  });
+
   test('groups are as large as their children', () => {
     const [g] = laidOut(doc([{ type: 'group', id: 'g', x: 100, y: 0, children: [{ type: 'rectangle', id: 'a', x: 10, y: 10, width: 20, height: 20 }, { type: 'ellipse', id: 'b', x: 50, y: 40, width: 20, height: 20 }] }]));
     expect([g!.ox, g!.oy, g!.w, g!.h]).toEqual([10, 10, 60, 50]);
@@ -183,6 +196,16 @@ describe('component instances', () => {
     expect(inst.instance?.ref).toBe('btn');
     expect(inst.children.map((c) => c.key)).toEqual(['i1/label', 'i1/inner']);
     expect(inst.children[0]!.p.content).toBe('Cancel');
+  });
+
+  test('an instance can bring the children of a slot component', () => {
+    const d2 = doc([
+      { type: 'frame', id: 'table', reusable: true, slot: ['row'], layout: 'vertical' },
+      { type: 'ref', id: 't1', ref: 'table', children: [{ type: 'rectangle', id: 'r1', width: 10, height: 10 }, { type: 'rectangle', id: 'r2', width: 10, height: 10 }] },
+    ]);
+    const v2 = new Variables(d2);
+    const t = new TreeBuilder(d2, v2, new Report()).build().roots[1]!;
+    expect(t.children.map((c) => c.key)).toEqual(['t1/r1', 't1/r2']);
   });
 
   test('a replacement swaps the nested instance', () => {
@@ -320,6 +343,18 @@ describe('end-to-end', () => {
   test('missing fonts are reported, the PostScript name follows the usual pattern', () => {
     const title = allLayers(pages(result)[0]!.layers).find((l) => l.name === 'Title')!;
     expect(title.attributedString.attributes[0].attributes.MSAttributedStringFontAttribute.attributes.name).toBe('Inter-Bold');
+  });
+});
+
+describe('image fill without an image', () => {
+  test('is drawn as pen.dev’s placeholder: a tiled checkerboard and an inside outline', async () => {
+    const d = doc([{ type: 'frame', id: 'f', width: 60, height: 60, layout: 'none', children: [{ type: 'frame', id: 'avatar', x: 10, y: 10, width: 40, height: 40, cornerRadius: 9999, fill: { type: 'image', mode: 'cover' } }] }]);
+    const result = await convertPen(parsePen(JSON.stringify(d), join(tmpdir(), 'placeholder.pen')), OFFLINE);
+    const avatar = allLayers(pages(result)[0]!.layers).find((l) => l.do_objectID === result.ctx.uuid('avatar'))!;
+    expect(avatar.style.fills[0]).toMatchObject({ fillType: 4, patternFillType: 0, patternTileScale: 0.5 });
+    expect(result.files[avatar.style.fills[0].image._ref]).toBeDefined();
+    expect(avatar.style.borders[0]).toMatchObject({ position: 1, thickness: 1 });
+    expect(result.ctx.report.warnings.map((w) => w.code)).toContain('image-placeholder');
   });
 });
 

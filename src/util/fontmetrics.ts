@@ -17,7 +17,7 @@ export class FontMetrics {
   private cmap = new Map<number, number>();
   private advances: Uint16Array = new Uint16Array(0);
   private kernCache = new Map<number, number>();
-  private pairLookups: number[] = []; // offsets of PairPos subtables
+  private pairLookups: number[][] = []; // PairPos subtable offsets, per lookup
   private legacyKern = new Map<number, number>();
 
   constructor(data: Uint8Array, faceIndex = 0) {
@@ -162,6 +162,7 @@ export class FontMetrics {
       const lookup = lookupList + v.getUint16(lookupList + 2 + index * 2);
       const type = v.getUint16(lookup);
       const subCount = v.getUint16(lookup + 4);
+      const subs: number[] = [];
       for (let s = 0; s < subCount; s++) {
         let sub = lookup + v.getUint16(lookup + 6 + s * 2);
         let subType = type;
@@ -169,8 +170,9 @@ export class FontMetrics {
           subType = v.getUint16(sub + 2);
           sub = sub + v.getUint32(sub + 4);
         }
-        if (subType === 2) this.pairLookups.push(sub);
+        if (subType === 2) subs.push(sub);
       }
+      if (subs.length) this.pairLookups.push(subs);
     }
   }
 
@@ -265,9 +267,19 @@ export class FontMetrics {
     return this.view.getInt16(o);
   }
 
+  /**
+   * Kerning of a pair: every kern lookup applies its first subtable that matches the pair, and the lookups add up
+   * (fonts like Inter split their kerning over several lookups).
+   */
   private pairKern(left: number, right: number): number {
+    let total = 0;
+    for (const subs of this.pairLookups) total += this.lookupKern(subs, left, right);
+    return total;
+  }
+
+  private lookupKern(subs: number[], left: number, right: number): number {
     const v = this.view;
-    for (const sub of this.pairLookups) {
+    for (const sub of subs) {
       const format = v.getUint16(sub);
       const cov = this.coverageIndex(sub + v.getUint16(sub + 2), left);
       if (cov < 0) continue;
@@ -291,17 +303,15 @@ export class FontMetrics {
           if (g < right) lo = mid + 1;
           else hi = mid - 1;
         }
+        // no pair for this glyph here: the next subtable may have one
       } else if (format === 2) {
         const c1 = this.classOf(sub + v.getUint16(sub + 8), left);
         const c2 = this.classOf(sub + v.getUint16(sub + 10), right);
         const class1Count = v.getUint16(sub + 12);
         const class2Count = v.getUint16(sub + 14);
         if (c1 >= class1Count || c2 >= class2Count) continue;
-        const r = sub + 16 + (c1 * class2Count + c2) * (s1 + s2);
-        const adv = this.xAdvance(r, vf1);
-        if (adv) return adv;
-        // a zero entry in a class subtable ends the search for this pair (OpenType semantics)
-        return 0;
+        // a class subtable that covers the first glyph applies, even with a zero value
+        return this.xAdvance(sub + 16 + (c1 * class2Count + c2) * (s1 + s2), vf1);
       }
     }
     return 0;
