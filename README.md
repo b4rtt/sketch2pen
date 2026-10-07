@@ -21,6 +21,12 @@
 
 ![The same Sketch features rendered by Sketch and by pen.dev after conversion](docs/images/lab-comparison.png)
 
+## Status
+
+Both directions and the app are complete as of version 2.0.0: Sketch → pen.dev, pen.dev → Sketch, the *Sketch ⇄ Pen*
+app for macOS and the command line for macOS, Linux and Windows. What a format cannot express is listed in the
+limitations below and in every conversion report.
+
 ## Install
 
 ### macOS app

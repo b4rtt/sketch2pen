@@ -1,6 +1,6 @@
 # How pen.dev documents are converted to Sketch
 
-The pen.dev → Sketch direction aims at one thing: **the Sketch document looks exactly like pen.dev draws the `.pen`
+The pen.dev → Sketch direction is complete since version 2.0.0. It aims at one thing: **the Sketch document looks exactly like pen.dev draws the `.pen`
 file**, with layers that stay editable – frames, stacks, symbols, swatches, text. Every mapping below was checked
 against renders of both apps with the [pen.dev feature lab](development.md#pendev-feature-lab); approximations are
 listed in the conversion report (`--json`, or the app's result screen).

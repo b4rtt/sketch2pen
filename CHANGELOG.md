@@ -1,6 +1,8 @@
 # Changelog
 
-## 2.0.0 – unreleased
+## 2.0.0 – 2026-10-07
+
+Both directions are complete: Sketch → pen.dev, pen.dev → Sketch, and a macOS app for both.
 
 - **pen.dev → Sketch.** `sketch2pen Design.pen` writes `Design (Sketch).sketch`: frames and Sketch stacks with the
   positions pen.dev computes, shapes, paths, gradients, strokes (also per side), shadows and blurs, text on the same
